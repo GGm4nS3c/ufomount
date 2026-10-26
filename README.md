@@ -29,12 +29,31 @@ arduino-cli upload -p COM5 --fqbn arduino:avr:uno firmware/ptztest
 
 # Interfaz
 pip install pyserial
+pip install pygame                               # opcional: control por mando
 python scripts/ptz_gui.py                        # USB (COM5)
 python scripts/ptz_gui.py --port 192.168.200.50  # red
 ```
 
 En la GUI, el desplegable de puerto ofrece los COM detectados y
 `192.168.200.50:5000`; también se puede escribir otra `IP:puerto`.
+
+## Control por mando
+
+Con `pygame` instalado, la GUI lee un mando (probado con el Nintendo Switch
+Pro Controller por USB; también sirven Xbox, PlayStation y genéricos) y
+**sigue funcionando con la ventana en segundo plano**.
+
+| Mando | Acción |
+|---|---|
+| Palanca izquierda | Mueve pan/tilt; cuanto más se inclina, más rápido (hasta la velocidad elegida en la GUI) |
+| Palanca derecha | Igual, pero a un 25 % de esa velocidad (ajuste fino) |
+| B | STOP |
+| ZL / ZR (L2 / R2) | Preset de velocidad anterior / siguiente (Fino, Normal, Avión) |
+
+Al soltar la palanca el eje se detiene. Respeta los límites del tilt; en
+diagonal mueve los dos ejes a la vez, salvo que se marque "Mover ejes de a
+uno" (entonces solo el más inclinado; útil con una fuente justa). La casilla *Usar
+mando* lo desactiva; debajo se ven las palancas en vivo.
 
 ## Límites del tilt (eje Y)
 

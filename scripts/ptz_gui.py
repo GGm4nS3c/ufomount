@@ -18,6 +18,7 @@ donde comando al servo; el servo no tiene salida de telemetria real.
 import argparse
 import json
 import math
+import os
 import queue
 import re
 import sys
@@ -35,6 +36,15 @@ except ImportError:
     print("Falta pyserial:  python -m pip install pyserial")
     sys.exit(1)
 
+try:   # mando opcional: python -m pip install pygame
+    os.environ.setdefault("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1")  # sin foco
+    os.environ.setdefault("SDL_WINDOWS_ENABLE_MESSAGELOOP", "0")  # no tocar a Tk
+    os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
+    import pygame
+    from pygame._sdl2 import controller as sdl_controller
+except ImportError:
+    pygame = None
+
 # ----------------------------- configuracion -----------------------------
 PORT_DEFAULT = "COM5"
 BAUD = 115200
@@ -47,7 +57,7 @@ X_MIN, X_MAX = 500, 2500   # pulso (us)
 Y_MIN, Y_MAX = 500, 2500
 X_DEG_TOTAL = 270.0        # recorrido fisico del eje X
 Y_DEG_TOTAL = 180.0
-INVERT_X = False           # invertir sentido visual de un eje si hace falta
+INVERT_X = True            # el servo X gira al reves (subir el pulso = izquierda)
 INVERT_Y = False
 Y_LIM_DEFAULT = (-50.0, 30.0)   # tilt permitido (suelo, cielo): mas alla topa
 CONFIG_PATH = Path.home() / ".ufomount_ptz.json"   # limites elegidos en la GUI
@@ -57,6 +67,11 @@ Y_US_PER_DEG = (Y_MAX - Y_MIN) / Y_DEG_TOTAL   # ~11.11
 
 SPEED_PRESETS = [("Fino", 2.0), ("Normal", 8.0), ("Avion", 25.0)]  # grados/s
 SPEED_MIN, SPEED_MAX = 0.5, 40.0
+
+PAD_POLL_MS = 50
+PAD_DEADZONE = 0.15        # las palancas del Switch Pro derivan un poco
+PAD_FINE = 0.25            # palanca derecha: fraccion de la velocidad elegida
+PAD_TRIGGER_ON, PAD_TRIGGER_OFF = 0.6, 0.3   # ZL/ZR (L2/R2) como botones
 
 STATUS_POLL_S = 0.2
 CMD_SETTLE_S = 0.7         # ventana en que un comando aun no se refleja en STATUS
@@ -200,6 +215,91 @@ class SerialLink:
                     self.rxq.put(("rx", line))
 
 
+class Gamepad:
+    """Mando (Switch Pro, Xbox, PlayStation...) leido con SDL via pygame.
+
+    Se lee aunque la ventana no tenga el foco. poll() devuelve None si no
+    hay mando; si hay, las palancas en -1..1 (Y positivo = arriba) y los
+    botones apretados desde la lectura anterior ("ZL"/"ZR" para los
+    gatillos, que SDL entrega como ejes).
+    """
+
+    BATTERY = {"empty": "vacia", "low": "baja", "medium": "media",
+               "full": "llena", "max": "llena", "wired": "con cable"}
+
+    def __init__(self):
+        self.available = pygame is not None
+        self.pad = None
+        self.js = None       # mismo mando visto como joystick (bateria)
+        self.trig = {"ZL": False, "ZR": False}
+        if self.available:
+            pygame.display.init()   # el bucle de eventos de SDL lo necesita
+            sdl_controller.init()
+
+    @property
+    def name(self):
+        return self.pad.name if self.pad is not None else ""
+
+    def _open(self):
+        for i in range(sdl_controller.get_count()):
+            if sdl_controller.is_controller(i):
+                try:
+                    return sdl_controller.Controller(i)
+                except pygame.error:
+                    pass
+        return None
+
+    def battery(self):
+        """Nivel de bateria segun SDL (solo 4 escalones) o None."""
+        if self.js is None:
+            return None
+        try:
+            return self.BATTERY.get(self.js.get_power_level())
+        except (AttributeError, pygame.error):
+            return None
+
+    def _triggers(self, zl, zr):
+        """Gatillos recien apretados; la histeresis evita repetir el pulso."""
+        pressed = set()
+        for name, v in (("ZL", zl), ("ZR", zr)):
+            if not self.trig[name] and v >= PAD_TRIGGER_ON:
+                self.trig[name] = True
+                pressed.add(name)
+            elif self.trig[name] and v <= PAD_TRIGGER_OFF:
+                self.trig[name] = False
+        return pressed
+
+    def poll(self):
+        if not self.available:
+            return None
+        pressed = set()
+        for ev in pygame.event.get():
+            if ev.type == pygame.CONTROLLERBUTTONDOWN:
+                pressed.add(ev.button)
+        if self.pad is not None and not self.pad.attached():
+            self.pad = self.js = None
+        if self.pad is None:
+            self.pad = self._open()
+            if self.pad is None:
+                return None
+            try:
+                self.js = self.pad.as_joystick()
+            except (AttributeError, pygame.error):
+                self.js = None
+            pressed.clear()
+
+        def axis(a):
+            return self.pad.get_axis(a) / 32767
+
+        pressed |= self._triggers(axis(pygame.CONTROLLER_AXIS_TRIGGERLEFT),
+                                  axis(pygame.CONTROLLER_AXIS_TRIGGERRIGHT))
+        return {"lx": axis(pygame.CONTROLLER_AXIS_LEFTX),
+                "ly": -axis(pygame.CONTROLLER_AXIS_LEFTY),
+                "rx": axis(pygame.CONTROLLER_AXIS_RIGHTX),
+                "ry": -axis(pygame.CONTROLLER_AXIS_RIGHTY),
+                "pressed": pressed}
+
+
 class PtzGui:
     def __init__(self, root, port=PORT_DEFAULT):
         self.root = root
@@ -221,17 +321,24 @@ class PtzGui:
         self._pending_y = None                   # (y_us, ts) goto secuencial
         self.y_lim = load_y_lim()                # tilt permitido (grados)
         self.lim_sent = 0.0                      # ts del ultimo LIMY enviado
+        self.pad = Gamepad()
+        self.pad_rate = {"X": None, "Y": None}   # RATE puesto por el mando
+        self.pad_rate_ts = {"X": 0.0, "Y": 0.0}
+        self._pad_text = None
+        self._pad_batt = None
+        self._pad_batt_tick = 0
 
         self._build_ui(port)
         self._tick()
+        self._pad_tick()
 
     # --------------------------- construccion UI ---------------------------
     def _build_ui(self, port):
         r = self.root
         r.title("UFOMOUNT PTZ")
         r.configure(bg=C_BG)
-        r.geometry("980x720")
-        r.minsize(760, 620)
+        r.geometry("980x820")
+        r.minsize(760, 720)
 
         style = ttk.Style(r)
         style.theme_use("clam")
@@ -378,12 +485,25 @@ class PtzGui:
             side="left", expand=True, fill="x", padx=(2, 0))
 
         # opciones
-        self.seq_var = tk.BooleanVar(value=True)
+        self.seq_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(left, text="Mover ejes de a uno (fuente justa)",
                         variable=self.seq_var).pack(anchor="w", pady=(12, 0))
         self.dbg_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(left, text="Ver polls STATUS en el log",
                         variable=self.dbg_var).pack(anchor="w")
+
+        # mando: funciona tambien con la ventana en segundo plano
+        ttk.Label(left, text="MANDO", style="Muted.TLabel",
+                  font=("Segoe UI", 8, "bold")).pack(anchor="w", pady=(14, 0))
+        self.pad_var = tk.BooleanVar(value=self.pad.available)
+        ttk.Checkbutton(left, text="Usar mando (tambien en segundo plano)",
+                        variable=self.pad_var).pack(anchor="w")
+        self.pad_lbl = tk.Label(left, text="", bg=C_PANEL, fg=C_MUTED,
+                                font=("Segoe UI", 8), justify="left")
+        self.pad_lbl.pack(anchor="w")
+        ttk.Label(left, text="palanca izq = mover · der = fino\n"
+                  "B = STOP · ZL / ZR (L2 / R2) = velocidad - / +",
+                  style="Muted.TLabel", font=("Segoe UI", 8)).pack(anchor="w")
 
         # ---- columna derecha: posicion + log ----
         right = ttk.Frame(r, style="TFrame")
@@ -681,6 +801,9 @@ class PtzGui:
         self.jog_src = {"X": set(), "Y": set()}
         self.send("STOP")
         self.tgt = dict(self.cur)
+        for axis in "XY":
+            if self.pad_rate[axis] is not None:
+                self._restore_rate(axis)
 
     def set_speed(self, value):
         self.speed_var.set(value)
@@ -700,6 +823,8 @@ class PtzGui:
             self.send(f"RATEX {max(5, int(v * X_US_PER_DEG))}", log=False)
             self.send(f"RATEY {max(5, int(v * Y_US_PER_DEG))}", log=False)
             self.log_line(f"velocidad -> {v:.1f} °/s", "info")
+        # si el mando esta moviendo, su proximo ciclo re-escala a la nueva
+        self.pad_rate = {"X": None, "Y": None}
 
     def _goto_pair(self, x_us, y_us):
         self._pending_y = None
@@ -739,6 +864,125 @@ class PtzGui:
         self._goto_pair((X_MIN + X_MAX) // 2,
                         max(lo, min(hi, (Y_MIN + Y_MAX) // 2)))
 
+    # ------------------------------ mando -----------------------------------
+    def _pad_tick(self):
+        st = self.pad.poll() if self.pad_var.get() else None
+        self._pad_batt_tick = (self._pad_batt_tick + 1) % 40   # cada ~2 s
+        if st is None:
+            self._pad_batt = None
+        elif self._pad_batt is None or self._pad_batt_tick == 0:
+            batt = self.pad.battery()
+            if batt != self._pad_batt and batt in ("baja", "vacia"):
+                self.log_line(f"mando: bateria {batt}", "warn")
+            self._pad_batt = batt
+        self._pad_show(st)
+        if st is not None and self.link.connected:
+            self._pad_apply(st)
+        else:
+            for axis in "XY":
+                self._pad_release(axis)
+        self.root.after(PAD_POLL_MS, self._pad_tick)
+
+    def _pad_show(self, st):
+        if not self.pad.available:
+            text = "pygame no instalado: pip install pygame"
+        elif not self.pad_var.get():
+            text = "desactivado"
+        elif st is None:
+            text = "sin mando conectado"
+        else:
+            text = self.pad.name
+        if text != self._pad_text:   # al log solo los cambios de estado
+            self._pad_text = text
+            self.log_line(f"mando: {text}", "info")
+        fg = C_MUTED
+        if st is not None:   # bateria y palancas en vivo
+            text += f"\nbateria: {self._pad_batt or '?'}"
+            text += (f"\nizq {st['lx']:+.1f} {st['ly']:+.1f} · "
+                     f"der {st['rx']:+.1f} {st['ry']:+.1f}")
+            fg = {"baja": C_WARN, "vacia": C_ERR}.get(self._pad_batt, C_OK)
+        if text != self.pad_lbl.cget("text") or fg != self.pad_lbl.cget("fg"):
+            self.pad_lbl.configure(text=text, fg=fg)
+
+    @staticmethod
+    def _pad_curve(v):
+        # cuadratica: fina cerca del centro, toda la velocidad al tope
+        a = abs(v)
+        if a <= PAD_DEADZONE:
+            return 0.0
+        k = min(1.0, (a - PAD_DEADZONE) / (1 - PAD_DEADZONE))
+        return math.copysign(k * k, v)
+
+    def _pad_apply(self, st):
+        for b in st["pressed"]:
+            if b == pygame.CONTROLLER_BUTTON_B:
+                self.log_line("mando: STOP", "warn")
+                self.stop_all()
+            elif b == "ZL":
+                self._pad_preset(-1)
+            elif b == "ZR":
+                self._pad_preset(+1)
+
+        speed = {}
+        for axis, main, fine in (("X", st["lx"], st["rx"]),
+                                 ("Y", st["ly"], st["ry"])):
+            s_main = self._pad_curve(main)
+            s_fine = self._pad_curve(fine) * PAD_FINE
+            speed[axis] = s_main if abs(s_main) >= abs(s_fine) else s_fine
+        if self.seq_var.get():   # un eje a la vez: manda el mas inclinado
+            weak = "Y" if abs(speed["X"]) >= abs(speed["Y"]) else "X"
+            speed[weak] = 0.0
+        for axis in "XY":
+            self._pad_drive(axis, speed[axis])
+
+    def _pad_drive(self, axis, s):
+        if s == 0.0:
+            self._pad_release(axis)
+            return
+        direction = 1 if s > 0 else -1
+        per_deg = X_US_PER_DEG if axis == "X" else Y_US_PER_DEG
+        rate = max(5, int(abs(s) * self.speed_var.get() * per_deg))
+        if "pad" in self.jog_src[axis] and self.jogging[axis] == direction:
+            last = self.pad_rate[axis]
+            if last is None or (abs(rate - last) >= max(3, last // 10) and
+                                time.time() - self.pad_rate_ts[axis] >= 0.1):
+                self._pad_set_rate(axis, rate)
+            return
+        if self.jog_src[axis] - {"pad"}:
+            return   # el teclado o el mouse ya mueven este eje
+        other = "Y" if axis == "X" else "X"
+        if self.seq_var.get() and self._axis_busy(other):
+            return   # espera callado a que el otro eje termine
+        self._pad_set_rate(axis, rate)
+        self.jog_start(axis, direction, "pad")
+
+    def _pad_set_rate(self, axis, rate):
+        if self.send(f"RATE{axis} {rate}", log=False):
+            self.pad_rate[axis] = rate
+            self.pad_rate_ts[axis] = time.time()
+
+    def _pad_release(self, axis):
+        if "pad" not in self.jog_src[axis]:
+            return
+        self.jog_stop(axis, "pad")
+        self._restore_rate(axis)
+
+    def _restore_rate(self, axis):
+        # el mando cambio la velocidad del eje: vuelve a la elegida en la GUI
+        per_deg = X_US_PER_DEG if axis == "X" else Y_US_PER_DEG
+        self.send(f"RATE{axis} {max(5, int(self.speed_var.get() * per_deg))}",
+                  log=False)
+        self.pad_rate[axis] = None
+
+    def _pad_preset(self, step):
+        vals = [v for _, v in SPEED_PRESETS]
+        cur = self.speed_var.get()
+        idx = min(range(len(vals)), key=lambda i: abs(vals[i] - cur))
+        idx = max(0, min(len(vals) - 1, idx + step))
+        self.set_speed(vals[idx])
+        self.log_line(f"mando: velocidad {SPEED_PRESETS[idx][0]} "
+                      f"{vals[idx]:g} °/s", "info")
+
     # ---------------------------- teclado -----------------------------------
     KEYMAP = {"Left": ("X", -1), "Right": ("X", +1),
               "Up": ("Y", +1), "Down": ("Y", -1)}
@@ -768,7 +1012,9 @@ class PtzGui:
         except (KeyError, tk.TclError):
             return
         self.keys_down.clear()
-        if self.jogging["X"] or self.jogging["Y"]:
+        # el mando sigue mandando en segundo plano: solo teclado/mouse quedan
+        # huerfanos al perder el foco
+        if any(self.jog_src[a] & {"key", "mouse"} for a in "XY"):
             self.log_line("foco perdido con jog activo -> STOP", "warn")
             self.stop_all()
 
