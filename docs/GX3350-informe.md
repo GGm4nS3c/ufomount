@@ -39,7 +39,7 @@ Según el diagrama del fabricante: **cable con franja blanca = SEÑAL** · **cab
 - Librería `Servo` estándar a 50 Hz: válida (el servo acepta desde 50 Hz hasta 333 Hz).
 - `attach(pin, 500, 2500)` + `writeMicroseconds()`. En la unidad de 180°: ~11,1 µs/°. En la de 270°: ~7,4 µs/°.
 - Limitar recorrido por software acotando el pulso; no salir de 500–2500 µs.
-- Señal en cualquier pin digital; en UNO la librería toma el Timer1 y anula `analogWrite()` en pines 9/10 (usamos justo esos: X→D9, Y→D10).
+- Señal en cualquier pin digital; en UNO la librería toma el Timer1 y anula `analogWrite()` en pines 9/10. Pines usados: X→D2, Y→D3 (D10 quedó para el chip-select de la shield Ethernet, junto con D11–D13 del SPI y D4 de la SD; D8/D9, al lado de D10, daban mal contacto bajo la shield).
 - El **programador USB GX001V3** permite ajustar ángulo, neutro, sentido, velocidad, banda muerta, soft-start y protección de bloqueo — con él se podría reconfigurar el recorrido si algún día hiciera falta. No modificar los parámetros marcados en rojo en su software.
 - Sin salida de telemetría de posición (3 hilos, solo entrada PWM), aunque el sensor interno es magnético.
 

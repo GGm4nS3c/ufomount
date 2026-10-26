@@ -29,7 +29,7 @@ try {
     Send-Cmd "STATUS"
 
     Write-Host ""
-    Write-Host "=== EJE X (pan, D9) - solo este servo energizado ==="
+    Write-Host "=== EJE X (pan, D2) - solo este servo energizado ==="
     Send-Cmd "ATTACHX" 800
     Send-Cmd "X 1600" 1500
     Send-Cmd "X 1400" 1500
@@ -37,7 +37,7 @@ try {
     Send-Cmd "DETACHX" 500
 
     Write-Host ""
-    Write-Host "=== EJE Y (tilt, D10) - solo este servo energizado ==="
+    Write-Host "=== EJE Y (tilt, D3) - solo este servo energizado ==="
     Send-Cmd "ATTACHY" 800
     Send-Cmd "Y 1600" 1500
     Send-Cmd "Y 1400" 1500
