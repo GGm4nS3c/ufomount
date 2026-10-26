@@ -10,6 +10,8 @@ Interfaz de escritorio en Python para el control fino (zoom) y el
 seguimiento rápido (aviones), con posición en vivo, velocidades
 configurables y log de actividad. Se conecta por USB o por red.
 
+![GUI de control conectada a la montura por red: dial de pan, dial de tilt con el recorrido permitido en verde y el bloqueado en rojo, y log](docs/img/gui-ptz.png)
+
 ## Estructura
 
 | Ruta | Qué es |
