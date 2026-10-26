@@ -6,10 +6,10 @@ Habla con el firmware ptztest v4 (Arduino UNO + shield Ethernet), por USB
 Eje X = pan 270 grados (D2) - Eje Y = tilt 180 grados (D3).
 
 Uso:
-    python scripts/ptz_gui.py                       # abre la interfaz
-    python scripts/ptz_gui.py --port COM7           # otro puerto USB
+    python scripts/ptz_gui.py                       # ultimo puerto que conecto (o red)
+    python scripts/ptz_gui.py --port COM7           # por USB
     python scripts/ptz_gui.py --port 192.168.200.50 # por red (puerto 5000)
-    python scripts/ptz_gui.py --check               # prueba de conexion sin GUI
+    python scripts/ptz_gui.py --check               # prueba de conexion sin GUI (COM5)
 
 La posicion mostrada es la ESTIMADA (lazo abierto): el firmware sabe
 donde comando al servo; el servo no tiene salida de telemetria real.
@@ -123,25 +123,33 @@ def valid_y_lim(lo, hi):
     return -Y_DEG_TOTAL / 2 <= lo < hi <= Y_DEG_TOTAL / 2 and hi - lo >= 5
 
 
+def load_cfg():
+    """Ajustes guardados por la GUI (limites, ultimo puerto)."""
+    try:
+        cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return cfg if isinstance(cfg, dict) else {}
+
+
+def save_cfg(**values):
+    cfg = load_cfg()
+    cfg.update(values)
+    CONFIG_PATH.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+
+
 def load_y_lim():
     """Limites de tilt guardados por la GUI; si no hay o no sirven, el defecto."""
     try:
-        lo, hi = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))["y_lim"]
+        lo, hi = load_cfg()["y_lim"]
         lo, hi = float(lo), float(hi)
-    except (OSError, ValueError, KeyError, TypeError):
+    except (ValueError, KeyError, TypeError):
         return Y_LIM_DEFAULT
     return (lo, hi) if valid_y_lim(lo, hi) else Y_LIM_DEFAULT
 
 
 def save_y_lim(lo, hi):
-    try:
-        cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        cfg = {}
-    if not isinstance(cfg, dict):
-        cfg = {}
-    cfg["y_lim"] = [lo, hi]
-    CONFIG_PATH.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+    save_cfg(y_lim=[lo, hi])
 
 
 def is_net_port(port):
@@ -327,6 +335,7 @@ class PtzGui:
         self._pad_text = None
         self._pad_batt = None
         self._pad_batt_tick = 0
+        self._batt_shown = "-"                   # "-" = icono oculto
 
         self._build_ui(port)
         self._tick()
@@ -377,9 +386,18 @@ class PtzGui:
                    ).grid(row=0, column=3)
         self.conn_btn = ttk.Button(top, text="Conectar", command=self.toggle_conn)
         self.conn_btn.grid(row=0, column=4, padx=8)
+        # bateria del mando: solo aparece con un mando conectado
+        self.batt_box = tk.Frame(top, bg=C_PANEL)
+        tk.Label(self.batt_box, text="mando", bg=C_PANEL, fg=C_MUTED,
+                 font=("Segoe UI", 8)).pack(side="left", padx=(0, 4))
+        self.batt_cv = tk.Canvas(self.batt_box, width=38, height=18,
+                                 bg=C_PANEL, highlightthickness=0)
+        self.batt_cv.pack(side="left")
+        self.batt_box.grid(row=0, column=5, sticky="e", padx=10)
+        self.batt_box.grid_remove()
         self.conn_lbl = tk.Label(top, text="desconectado", bg=C_PANEL2,
                                  fg=C_MUTED, padx=10, pady=2)
-        self.conn_lbl.grid(row=0, column=5, sticky="e", padx=2)
+        self.conn_lbl.grid(row=0, column=6, sticky="e", padx=2)
 
         # ---- columna izquierda: controles ----
         left = ttk.Frame(r, style="Panel.TFrame", padding=10)
@@ -658,6 +676,10 @@ class PtzGui:
         if self.pong_ok:
             self.conn_lbl.configure(text=f"conectado · {self.port_var.get()}",
                                     fg=C_OK)
+            try:   # la proxima vez la GUI abre con este puerto
+                save_cfg(port=self.port_var.get().strip())
+            except OSError:
+                pass
             self.log_line(f"conectado; velocidad {self.speed_var.get():.1f} °/s"
                           f", watchdog {WDT_MS} ms, tilt Y "
                           f"{self.y_lim[0]:+g}° a {self.y_lim[1]:+g}°", "info")
@@ -895,14 +917,41 @@ class PtzGui:
         if text != self._pad_text:   # al log solo los cambios de estado
             self._pad_text = text
             self.log_line(f"mando: {text}", "info")
-        fg = C_MUTED
-        if st is not None:   # bateria y palancas en vivo
-            text += f"\nbateria: {self._pad_batt or '?'}"
+        if st is not None:   # palancas en vivo, para ver que el mando responde
             text += (f"\nizq {st['lx']:+.1f} {st['ly']:+.1f} · "
                      f"der {st['rx']:+.1f} {st['ry']:+.1f}")
-            fg = {"baja": C_WARN, "vacia": C_ERR}.get(self._pad_batt, C_OK)
-        if text != self.pad_lbl.cget("text") or fg != self.pad_lbl.cget("fg"):
-            self.pad_lbl.configure(text=text, fg=fg)
+        if text != self.pad_lbl.cget("text"):
+            self.pad_lbl.configure(text=text, fg=C_OK if st else C_MUTED)
+        shown = self._pad_batt if st is not None else "-"
+        if shown != self._batt_shown:
+            self._batt_shown = shown
+            if st is None:
+                self.batt_box.grid_remove()
+            else:
+                self._draw_battery(self._pad_batt)
+                self.batt_box.grid()
+
+    BATT_BARS = {"vacia": 0, "baja": 1, "media": 2, "llena": 3}
+
+    def _draw_battery(self, level):
+        """Pila de 3 rayas (SDL da 4 niveles); rayo = cargando por cable."""
+        c = self.batt_cv
+        c.delete("all")
+        bars = self.BATT_BARS.get(level)
+        color = {0: C_ERR, 1: C_WARN}.get(bars, C_OK)
+        edge = C_ERR if bars == 0 else C_MUTED
+        c.create_rectangle(2, 3, 32, 15, outline=edge, width=2)
+        c.create_rectangle(33, 6, 36, 12, fill=edge, outline="")
+        if bars is not None:
+            for i in range(bars):
+                x = 5 + i * 9
+                c.create_rectangle(x, 6, x + 7, 12, fill=color, outline="")
+        elif level == "con cable":
+            c.create_polygon(19, 4, 11, 10, 16, 10, 13, 15, 22, 8, 17, 8,
+                             fill=C_WARN, outline="")
+        else:
+            c.create_text(17, 9, text="?", fill=C_MUTED,
+                          font=("Segoe UI", 8, "bold"))
 
     @staticmethod
     def _pad_curve(v):
@@ -1269,15 +1318,16 @@ def main():
     ap = argparse.ArgumentParser(description="Control PTZ ufomount")
     ap.add_argument("--check", action="store_true",
                     help="prueba de conexion sin GUI")
-    ap.add_argument("--port", default=PORT_DEFAULT,
+    ap.add_argument("--port", default=None,
                     help="COMx (USB) o IP[:puerto] (red, puerto 5000 por "
-                         "defecto)")
+                         "defecto); sin indicar: el ultimo que conecto o la "
+                         "red")
     args = ap.parse_args()
     if args.check:
-        check_mode(args.port)
+        check_mode(args.port or PORT_DEFAULT)
         return
     root = tk.Tk()
-    PtzGui(root, port=args.port)
+    PtzGui(root, port=args.port or load_cfg().get("port") or NET_DEFAULT)
     root.mainloop()
 
 

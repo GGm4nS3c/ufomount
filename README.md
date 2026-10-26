@@ -30,12 +30,15 @@ arduino-cli upload -p COM5 --fqbn arduino:avr:uno firmware/ptztest
 # Interfaz
 pip install pyserial
 pip install pygame                               # opcional: control por mando
-python scripts/ptz_gui.py                        # USB (COM5)
+python scripts/ptz_gui.py                        # último puerto que conectó (o la red)
+python scripts/ptz_gui.py --port COM5            # USB
 python scripts/ptz_gui.py --port 192.168.200.50  # red
 ```
 
 En la GUI, el desplegable de puerto ofrece los COM detectados y
-`192.168.200.50:5000`; también se puede escribir otra `IP:puerto`.
+`192.168.200.50:5000`; también se puede escribir otra `IP:puerto`. La GUI
+recuerda el último puerto que conectó (en `~/.ufomount_ptz.json`, junto con
+los límites del tilt).
 
 ## Control por mando
 
@@ -111,4 +114,8 @@ Detalles, protocolo serie completo y fuentes en
 
 `python -m PyInstaller --onefile --windowed --name UfomountPTZ scripts/ptz_gui.py`
 genera el ejecutable standalone (los binarios no se versionan; ver
-Releases si hay alguno publicado).
+Releases si hay alguno publicado). Con `pygame` instalado al compilar, el
+`.exe` incluye el soporte de mando: en otro equipo con Windows 10/11 de 64
+bits no hace falta instalar Python ni drivers. Al ser un ejecutable sin
+firma, SmartScreen puede avisar la primera vez (*Más información →
+Ejecutar de todas formas*).
