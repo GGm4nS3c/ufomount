@@ -1,19 +1,22 @@
 #!/usr/bin/env python3
 """Interfaz de control de la montura PTZ ufomount.
 
-Habla con el firmware ptztest v3 (Arduino UNO, 115200 baudios).
-Eje X = pan 270 grados (D9) - Eje Y = tilt 180 grados (D10).
+Habla con el firmware ptztest v4 (Arduino UNO + shield Ethernet), por USB
+(115200 baudios) o por red (TCP, mismo protocolo de lineas).
+Eje X = pan 270 grados (D2) - Eje Y = tilt 180 grados (D3).
 
 Uso:
-    python scripts/ptz_gui.py                  # abre la interfaz
-    python scripts/ptz_gui.py --port COM7      # otro puerto
-    python scripts/ptz_gui.py --check          # prueba de conexion sin GUI
+    python scripts/ptz_gui.py                       # abre la interfaz
+    python scripts/ptz_gui.py --port COM7           # otro puerto USB
+    python scripts/ptz_gui.py --port 192.168.200.50 # por red (puerto 5000)
+    python scripts/ptz_gui.py --check               # prueba de conexion sin GUI
 
 La posicion mostrada es la ESTIMADA (lazo abierto): el firmware sabe
 donde comando al servo; el servo no tiene salida de telemetria real.
 """
 
 import argparse
+import json
 import math
 import queue
 import re
@@ -21,10 +24,12 @@ import sys
 import threading
 import time
 import tkinter as tk
+from pathlib import Path
 from tkinter import ttk
 
 try:
     import serial
+    import serial.urlhandler.protocol_socket  # noqa: F401  (socket://, PyInstaller)
     from serial.tools import list_ports
 except ImportError:
     print("Falta pyserial:  python -m pip install pyserial")
@@ -34,6 +39,9 @@ except ImportError:
 PORT_DEFAULT = "COM5"
 BAUD = 115200
 BOOT_WAIT_S = 2.5          # el UNO se resetea al abrir el puerto
+NET_DEFAULT = "192.168.200.50:5000"   # shield Ethernet (IP fija del firmware)
+NET_TCP_PORT = 5000
+NET_WAIT_S = 0.3           # por red no hay reset: solo esperar el saludo
 
 X_MIN, X_MAX = 500, 2500   # pulso (us)
 Y_MIN, Y_MAX = 500, 2500
@@ -41,6 +49,8 @@ X_DEG_TOTAL = 270.0        # recorrido fisico del eje X
 Y_DEG_TOTAL = 180.0
 INVERT_X = False           # invertir sentido visual de un eje si hace falta
 INVERT_Y = False
+Y_LIM_DEFAULT = (-50.0, 30.0)   # tilt permitido (suelo, cielo): mas alla topa
+CONFIG_PATH = Path.home() / ".ufomount_ptz.json"   # limites elegidos en la GUI
 
 X_US_PER_DEG = (X_MAX - X_MIN) / X_DEG_TOTAL   # ~7.41
 Y_US_PER_DEG = (Y_MAX - Y_MIN) / Y_DEG_TOTAL   # ~11.11
@@ -56,6 +66,7 @@ STATUS_RE = re.compile(
     r"attX=(\d) attY=(\d) X=(\d+)/(\d+) \[(\d+)-(\d+)\]"
     r" Y=(\d+)/(\d+) \[(\d+)-(\d+)\] rateX=(\d+) rateY=(\d+) idle=(\d+)"
 )
+NET_RE = re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?$")
 
 # ------------------------------- colores ---------------------------------
 C_BG = "#14191F"
@@ -69,6 +80,10 @@ C_OK = "#7FC698"
 C_ERR = "#E57373"
 C_WARN = "#D9A93F"
 C_LINE = "#2A343D"
+C_LIM_OK = "#3FA35F"   # tilt permitido (borde del dial)
+C_LIM_BAD = "#C2473F"  # tilt bloqueado
+C_ZONE_OK = "#1C3326"  # relleno de las mismas zonas
+C_ZONE_BAD = "#3A1E21"
 
 
 def us_to_deg(us, axis):
@@ -89,8 +104,50 @@ def deg_to_us(deg, axis):
     return int(round((Y_MIN + Y_MAX) / 2 + deg * Y_US_PER_DEG))
 
 
+def valid_y_lim(lo, hi):
+    return -Y_DEG_TOTAL / 2 <= lo < hi <= Y_DEG_TOTAL / 2 and hi - lo >= 5
+
+
+def load_y_lim():
+    """Limites de tilt guardados por la GUI; si no hay o no sirven, el defecto."""
+    try:
+        lo, hi = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))["y_lim"]
+        lo, hi = float(lo), float(hi)
+    except (OSError, ValueError, KeyError, TypeError):
+        return Y_LIM_DEFAULT
+    return (lo, hi) if valid_y_lim(lo, hi) else Y_LIM_DEFAULT
+
+
+def save_y_lim(lo, hi):
+    try:
+        cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        cfg = {}
+    if not isinstance(cfg, dict):
+        cfg = {}
+    cfg["y_lim"] = [lo, hi]
+    CONFIG_PATH.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+
+
+def is_net_port(port):
+    return port.startswith("socket://") or bool(NET_RE.match(port))
+
+
+def open_port(port, timeout):
+    """COMx -> USB; IP[:puerto] o socket://host:puerto -> red (TCP).
+
+    Ambos devuelven un objeto pyserial con la misma interfaz
+    (readline/write/close), asi el resto del codigo no distingue.
+    """
+    if NET_RE.match(port):
+        port = "socket://" + (port if ":" in port else f"{port}:{NET_TCP_PORT}")
+    if port.startswith("socket://"):
+        return serial.serial_for_url(port, timeout=timeout)
+    return serial.Serial(port, BAUD, timeout=timeout)
+
+
 class SerialLink:
-    """Conexion serie con hilo lector generacional.
+    """Conexion (USB o TCP) con hilo lector generacional.
 
     Cada open() crea un hilo con SU PROPIO handle y SU PROPIO Event de
     parada: un hilo viejo nunca puede observar (ni matar) una conexion
@@ -101,14 +158,16 @@ class SerialLink:
         self.rxq = rxq
         self.ser = None
         self._stop = None
+        self.is_net = False
 
     @property
     def connected(self):
         return self.ser is not None and self.ser.is_open
 
     def open(self, port):
-        ser = serial.Serial(port, BAUD, timeout=0.2)
+        ser = open_port(port, timeout=0.2)
         stop = threading.Event()
+        self.is_net = is_net_port(port)
         self.ser = ser
         self._stop = stop
         threading.Thread(target=self._reader, args=(ser, stop),
@@ -160,6 +219,8 @@ class PtzGui:
         self._speed_job = None
         self._handshake_job = None
         self._pending_y = None                   # (y_us, ts) goto secuencial
+        self.y_lim = load_y_lim()                # tilt permitido (grados)
+        self.lim_sent = 0.0                      # ts del ultimo LIMY enviado
 
         self._build_ui(port)
         self._tick()
@@ -169,8 +230,8 @@ class PtzGui:
         r = self.root
         r.title("UFOMOUNT PTZ")
         r.configure(bg=C_BG)
-        r.geometry("980x640")
-        r.minsize(760, 520)
+        r.geometry("980x720")
+        r.minsize(760, 620)
 
         style = ttk.Style(r)
         style.theme_use("clam")
@@ -201,7 +262,7 @@ class PtzGui:
                   font=("Segoe UI", 13, "bold")).grid(row=0, column=0, padx=(2, 14))
         ttk.Label(top, text="Puerto:", style="Muted.TLabel").grid(row=0, column=1)
         self.port_var = tk.StringVar(value=port)
-        self.port_cb = ttk.Combobox(top, textvariable=self.port_var, width=10,
+        self.port_cb = ttk.Combobox(top, textvariable=self.port_var, width=20,
                                     values=self._ports())
         self.port_cb.grid(row=0, column=2, padx=4)
         ttk.Button(top, text="↻", width=3,
@@ -293,6 +354,29 @@ class PtzGui:
         ttk.Button(grow2, text="Centrar", command=self.center).pack(
             side="left", expand=True, fill="x", padx=(2, 0))
 
+        # limites del tilt: que la camara no tope
+        ttk.Label(left, text="LIMITES TILT Y (grados)", style="Muted.TLabel",
+                  font=("Segoe UI", 8, "bold")).pack(anchor="w", pady=(14, 2))
+        lrow = tk.Frame(left, bg=C_PANEL)
+        lrow.pack(fill="x")
+        spin = dict(from_=-Y_DEG_TOTAL / 2, to=Y_DEG_TOTAL / 2, increment=1,
+                    width=5, bg=C_PANEL2, fg=C_Y, buttonbackground=C_PANEL2,
+                    bd=0, insertbackground=C_TEXT)
+        self.lim_lo = tk.Spinbox(lrow, **spin)
+        self.lim_hi = tk.Spinbox(lrow, **spin)
+        tk.Label(lrow, text="suelo", bg=C_PANEL, fg=C_MUTED).pack(side="left")
+        self.lim_lo.pack(side="left", padx=(2, 8))
+        tk.Label(lrow, text="cielo", bg=C_PANEL, fg=C_MUTED).pack(side="left")
+        self.lim_hi.pack(side="left", padx=2)
+        self._show_y_lim()
+        lrow2 = tk.Frame(left, bg=C_PANEL)
+        lrow2.pack(fill="x", pady=4)
+        ttk.Button(lrow2, text="Aplicar", command=self.apply_y_lim).pack(
+            side="left", expand=True, fill="x", padx=(0, 2))
+        ttk.Button(lrow2, text="Por defecto",
+                   command=lambda: self.apply_y_lim(*Y_LIM_DEFAULT)).pack(
+            side="left", expand=True, fill="x", padx=(2, 0))
+
         # opciones
         self.seq_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(left, text="Mover ejes de a uno (fuente justa)",
@@ -342,6 +426,10 @@ class PtzGui:
                  "cono = campo de vision, linea punteada = objetivo",
                  bg=C_PANEL, fg=C_MUTED, font=("Segoe UI", 8)).grid(
                      row=4, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        tk.Label(pos, text="tilt: verde = recorrido disponible · rojo = bloqueado "
+                 "(la camara toparia)",
+                 bg=C_PANEL, fg=C_MUTED, font=("Segoe UI", 8)).grid(
+                     row=5, column=0, columnspan=2, sticky="w")
 
         logf = ttk.Frame(right, style="Panel.TFrame", padding=(8, 6))
         logf.grid(row=1, column=0, sticky="nsew", pady=(6, 0))
@@ -367,7 +455,8 @@ class PtzGui:
         r.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _ports(self):
-        return [p.device for p in list_ports.comports()] or [PORT_DEFAULT]
+        usb = [p.device for p in list_ports.comports()] or [PORT_DEFAULT]
+        return usb + [NET_DEFAULT]
 
     # ------------------------------- log -----------------------------------
     def log_line(self, text, tag="info"):
@@ -392,6 +481,10 @@ class PtzGui:
             self.disconnect("desconectado por el usuario")
             return
         port = self.port_var.get().strip()
+        if is_net_port(port):
+            # create_connection bloquea hasta 5 s si la IP no contesta
+            self.log_line(f"conectando por red a {port}...", "info")
+            self.root.update_idletasks()
         try:
             self.link.open(port)
         except Exception as exc:
@@ -400,10 +493,14 @@ class PtzGui:
         self._reset_local_state()
         self.conn_lbl.configure(text=f"conectando a {port}...", fg=C_WARN)
         self.conn_btn.configure(text="Desconectar")
-        self.log_line(f"puerto {port} abierto, esperando arranque del UNO "
-                      f"({BOOT_WAIT_S:.0f} s)...", "info")
-        self._handshake_job = self.root.after(int(BOOT_WAIT_S * 1000),
-                                              self._handshake)
+        if self.link.is_net:
+            wait = NET_WAIT_S
+            self.log_line(f"socket TCP abierto con {port}", "info")
+        else:
+            wait = BOOT_WAIT_S
+            self.log_line(f"puerto {port} abierto, esperando arranque del UNO "
+                          f"({BOOT_WAIT_S:.0f} s)...", "info")
+        self._handshake_job = self.root.after(int(wait * 1000), self._handshake)
 
     def _reset_local_state(self):
         self.cur = {"X": 1500, "Y": 1500}
@@ -427,11 +524,13 @@ class PtzGui:
                   log=False)
         self.send(f"RATEY {max(5, int(self.speed_var.get() * Y_US_PER_DEG))}",
                   log=False)
+        self._send_y_lim()
         self.root.after(1500, self._check_pong)
-        self.log_line("Nota: el UNO se resetea al conectar y su posicion "
-                      "estimada vuelve a 0°/0°. Si la montura NO esta centrada "
-                      "fisicamente, el primer movimiento puede dar un salto.",
-                      "warn")
+        if not self.link.is_net:
+            self.log_line("Nota: el UNO se resetea al conectar y su posicion "
+                          "estimada vuelve a 0°/0°. Si la montura NO esta "
+                          "centrada fisicamente, el primer movimiento puede "
+                          "dar un salto.", "warn")
 
     def _check_pong(self):
         if not self.link.connected:
@@ -440,7 +539,8 @@ class PtzGui:
             self.conn_lbl.configure(text=f"conectado · {self.port_var.get()}",
                                     fg=C_OK)
             self.log_line(f"conectado; velocidad {self.speed_var.get():.1f} °/s"
-                          f", watchdog {WDT_MS} ms", "info")
+                          f", watchdog {WDT_MS} ms, tilt Y "
+                          f"{self.y_lim[0]:+g}° a {self.y_lim[1]:+g}°", "info")
         else:
             self.conn_lbl.configure(text="sin respuesta del firmware",
                                     fg=C_WARN)
@@ -485,6 +585,52 @@ class PtzGui:
             self.awaiting_reply = False
             self.log_line("sin respuesta del firmware a un comando", "err")
 
+    # ---------------------------- limites ----------------------------------
+    def _lim_us(self, axis):
+        """Pulso permitido: X completo, Y segun los limites de tilt."""
+        if axis == "X":
+            return X_MIN, X_MAX
+        a, b = (deg_to_us(d, "Y") for d in self.y_lim)
+        return min(a, b), max(a, b)
+
+    def _show_y_lim(self):
+        for box, val in ((self.lim_lo, self.y_lim[0]), (self.lim_hi, self.y_lim[1])):
+            box.delete(0, "end")
+            box.insert(0, f"{val:g}")
+
+    def _send_y_lim(self):
+        # el firmware re-acota el objetivo: si Y quedo fuera, va al limite
+        lo, hi = self._lim_us("Y")
+        if self.send(f"LIMY {lo} {hi}", log=False):
+            self.lim_sent = time.time()
+
+    def apply_y_lim(self, lo=None, hi=None):
+        try:
+            lo = float(self.lim_lo.get()) if lo is None else lo
+            hi = float(self.lim_hi.get()) if hi is None else hi
+        except ValueError:
+            self.log_line("limite de tilt no valido", "err")
+            return
+        if not valid_y_lim(lo, hi):
+            self.log_line("limites de tilt no validos: suelo < cielo, entre "
+                          "-90 y +90, con al menos 5° de recorrido", "err")
+            return
+        self.y_lim = (lo, hi)
+        self._show_y_lim()
+        try:
+            save_y_lim(lo, hi)
+        except OSError as exc:
+            self.log_line(f"no se pudieron guardar los limites ({exc})", "warn")
+        self.log_line(f"tilt Y permitido: {lo:+g}° (suelo) a {hi:+g}° (cielo)",
+                      "info")
+        if self.link.connected:
+            ylo, yhi = self._lim_us("Y")
+            if not ylo <= self.tgt["Y"] <= yhi:
+                self.log_line("Y esta fuera de los nuevos limites: va al limite",
+                              "warn")
+            self._send_y_lim()
+        self._redraw_dials()
+
     # --------------------------- movimiento ---------------------------------
     def _axis_busy(self, axis):
         if self.jogging[axis]:
@@ -512,7 +658,7 @@ class PtzGui:
         self._pending_y = None
         inv = INVERT_X if axis == "X" else INVERT_Y
         d = -direction if inv else direction
-        lo, hi = (X_MIN, X_MAX) if axis == "X" else (Y_MIN, Y_MAX)
+        lo, hi = self._lim_us(axis)
         tgt = hi if d > 0 else lo
         self.jogging[axis] = direction
         if self.send(f"{axis} {tgt}"):
@@ -580,13 +726,18 @@ class PtzGui:
             self.log_line("valor de grados no valido", "err")
             return
         gx = max(-X_DEG_TOTAL / 2, min(X_DEG_TOTAL / 2, gx))
-        gy = max(-Y_DEG_TOTAL / 2, min(Y_DEG_TOTAL / 2, gy))
+        lo, hi = self.y_lim
+        if not lo <= gy <= hi:
+            gy = max(lo, min(hi, gy))
+            self.log_line(f"Y acotado a {gy:+g}° (limites de tilt)", "warn")
         self.log_line(f"ir a X={gx:+.1f}° Y={gy:+.1f}°", "info")
         self._goto_pair(deg_to_us(gx, "X"), deg_to_us(gy, "Y"))
 
     def center(self):
         self.log_line("centrando", "info")
-        self._goto_pair((X_MIN + X_MAX) // 2, (Y_MIN + Y_MAX) // 2)
+        lo, hi = self._lim_us("Y")
+        self._goto_pair((X_MIN + X_MAX) // 2,
+                        max(lo, min(hi, (Y_MIN + Y_MAX) // 2)))
 
     # ---------------------------- teclado -----------------------------------
     KEYMAP = {"Left": ("X", -1), "Right": ("X", +1),
@@ -627,7 +778,7 @@ class PtzGui:
             while True:
                 kind, line = self.rxq.get_nowait()
                 if kind == "lost":
-                    self.disconnect("conexion serie perdida")
+                    self.disconnect("conexion perdida")
                     continue
                 if line.startswith(("OK", "ERR", "PONG")):
                     self.awaiting_reply = False
@@ -672,6 +823,14 @@ class PtzGui:
         if time.time() - self.move_sent["Y"] >= CMD_SETTLE_S:
             self.tgt["Y"] = tgt_y
 
+        # si otro cliente (USB) cambio los limites de Y, la GUI los repone
+        fw_lim = (int(m.group(9)), int(m.group(10)))
+        if (self.pong_ok and fw_lim != self._lim_us("Y")
+                and time.time() - self.lim_sent >= 3):
+            self.log_line(f"el firmware tenia Y limitado a {fw_lim[0]}-"
+                          f"{fw_lim[1]} us; se reponen los de la GUI", "warn")
+            self._send_y_lim()
+
         # goto secuencial dirigido por estado: Y sale cuando X termino
         if self._pending_y is not None:
             y_us, t0 = self._pending_y
@@ -685,10 +844,11 @@ class PtzGui:
         dy = us_to_deg(self.cur["Y"], "Y")
         self.deg_x.configure(text=f"{dx:+.1f}°")
         self.deg_y.configure(text=f"{dy:+.1f}°")
-        sx = "moviendo" if self.cur["X"] != self.tgt["X"] else \
-             ("sosteniendo" if self.att["X"] else "reposo")
-        sy = "moviendo" if self.cur["Y"] != self.tgt["Y"] else \
-             ("sosteniendo" if self.att["Y"] else "reposo")
+        # desacoplado el firmware no avanza la rampa: cur != tgt no es movimiento
+        sx = "reposo" if not self.att["X"] else \
+             ("moviendo" if self.cur["X"] != self.tgt["X"] else "sosteniendo")
+        sy = "reposo" if not self.att["Y"] else \
+             ("moviendo" if self.cur["Y"] != self.tgt["Y"] else "sosteniendo")
         self.us_x.configure(text=f"{self.cur['X']} us · {sx}")
         self.us_y.configure(text=f"{self.cur['Y']} us · {sy}")
         self._redraw_dials()
@@ -763,8 +923,21 @@ class PtzGui:
         cx, cy = max(10, (w - rad) / 2 - 14), h / 2
         box = (cx - rad, cy - rad, cx + rad, cy + rad)
 
+        # recorrido disponible (verde) y bloqueado (rojo): relleno + borde
+        lo, hi = self.y_lim
+        zones = ((-90, lo + 90, C_ZONE_BAD, C_LIM_BAD),
+                 (lo, hi - lo, C_ZONE_OK, C_LIM_OK),
+                 (hi, 90 - hi, C_ZONE_BAD, C_LIM_BAD))
+        ring = (cx - rad + 4, cy - rad + 4, cx + rad - 4, cy + rad - 4)
+        for start, extent, fill, edge in zones:
+            if extent <= 0:
+                continue
+            c.create_arc(*box, start=start, extent=extent, style="pieslice",
+                         fill=fill, outline="")
+            c.create_arc(*ring, start=start, extent=extent, style="arc",
+                         outline=edge, width=8)
         c.create_arc(*box, start=-90, extent=180, style="pieslice",
-                     fill=C_PANEL2, outline=C_LINE)
+                     fill="", outline=C_LINE)
 
         tilt = us_to_deg(self.cur["Y"], "Y")
         tgt = us_to_deg(self.tgt["Y"], "Y")
@@ -791,6 +964,14 @@ class PtzGui:
                           cy - (rad + 10) * math.sin(a),
                           text=txt, fill=C_MUTED, font=("Segoe UI", 7),
                           anchor="w" if deg == 0 else "center")
+        for deg in (lo, hi):
+            a = math.radians(deg)
+            c.create_line(cx, cy, cx + rad * math.cos(a), cy - rad * math.sin(a),
+                          fill=C_LIM_OK, dash=(2, 3))
+            c.create_text(cx + (rad + 6) * math.cos(a),
+                          cy - (rad + 6) * math.sin(a),
+                          text=f"{deg:+g}°", fill=C_LIM_OK,
+                          font=("Segoe UI", 8, "bold"), anchor="w")
 
         # objetivo (punteado) y aguja de la camara
         if self.tgt["Y"] != self.cur["Y"]:
@@ -815,18 +996,25 @@ class PtzGui:
         self.root.destroy()
 
 
+def _read_text(ser):
+    # read(n) con timeout devuelve lo llegado en esa ventana (USB y TCP;
+    # read_all() no sirve por TCP: in_waiting del socket vale 0 o 1)
+    return ser.read(4096).decode("ascii", errors="replace").strip()
+
+
 def check_mode(port):
-    print(f"Abriendo {port} (el UNO se resetea)...")
-    ser = serial.Serial(port, BAUD, timeout=0.5)
-    time.sleep(BOOT_WAIT_S)
-    banner = ser.read_all().decode("ascii", errors="replace").strip()
-    print(f"BOOT: {banner}")
-    ser.write(b"PING\n")
-    time.sleep(0.4)
-    print(f"RESP: {ser.read_all().decode('ascii', errors='replace').strip()}")
-    ser.write(b"STATUS\n")
-    time.sleep(0.4)
-    print(f"STATUS: {ser.read_all().decode('ascii', errors='replace').strip()}")
+    net = is_net_port(port)
+    print(f"Abriendo {port}" + (" por red..." if net else
+                                " (el UNO se resetea)..."))
+    ser = open_port(port, timeout=0.5)
+    if not net:
+        time.sleep(BOOT_WAIT_S)
+    banner = _read_text(ser)
+    if banner or not net:   # por TCP pyserial puede descartar el saludo al abrir
+        print(f"BOOT: {banner}")
+    for cmd in ("PING", "STATUS", "NET"):
+        ser.write(cmd.encode("ascii") + b"\n")
+        print(f"{cmd}: {_read_text(ser)}")
     ser.close()
     print("OK")
 
@@ -835,7 +1023,9 @@ def main():
     ap = argparse.ArgumentParser(description="Control PTZ ufomount")
     ap.add_argument("--check", action="store_true",
                     help="prueba de conexion sin GUI")
-    ap.add_argument("--port", default=PORT_DEFAULT)
+    ap.add_argument("--port", default=PORT_DEFAULT,
+                    help="COMx (USB) o IP[:puerto] (red, puerto 5000 por "
+                         "defecto)")
     args = ap.parse_args()
     if args.check:
         check_mode(args.port)

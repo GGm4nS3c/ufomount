@@ -4,8 +4,8 @@
 #   powershell -ExecutionPolicy Bypass -File .\scripts\jog-servos.ps1
 #
 # Teclas:
-#   1       activa/desactiva el servo X (D9)   (arranca sostenido en 1500us)
-#   2       activa/desactiva el servo Y (D10)
+#   1       activa/desactiva el servo X (D2)   (arranca sostenido en 1500us)
+#   2       activa/desactiva el servo Y (D3)
 #   A / D   mueve X  (-/+ un paso)
 #   W / S   mueve Y  (+/- un paso)
 #   Q / E   cambia el paso: 5 / 25 / 100 us
@@ -36,7 +36,7 @@ try {
     $null = $p.ReadExisting()
 
     Send "LIMX 500 2500"
-    Send "LIMY 500 2500"
+    Send "LIMY 944 1833"   # tilt -50 (suelo) a +30 (cielo): mas alla la camara topa
     Send "RATE 900"
 
     $tgtX = 1500; $tgtY = 1500
@@ -59,8 +59,8 @@ try {
             'D2' { if ($attY) { Send "DETACHY"; $attY = $false } else { Send "ATTACHY"; $attY = $true; $tgtY = 1500 } }
             'A'  { if ($attX) { $tgtX = [Math]::Max(500,  $tgtX - $step); Send ("X " + $tgtX) } }
             'D'  { if ($attX) { $tgtX = [Math]::Min(2500, $tgtX + $step); Send ("X " + $tgtX) } }
-            'W'  { if ($attY) { $tgtY = [Math]::Min(2500, $tgtY + $step); Send ("Y " + $tgtY) } }
-            'S'  { if ($attY) { $tgtY = [Math]::Max(500,  $tgtY - $step); Send ("Y " + $tgtY) } }
+            'W'  { if ($attY) { $tgtY = [Math]::Min(1833, $tgtY + $step); Send ("Y " + $tgtY) } }
+            'S'  { if ($attY) { $tgtY = [Math]::Max(944,  $tgtY - $step); Send ("Y " + $tgtY) } }
             'Q'  { $stepIdx = [Math]::Max(0, $stepIdx - 1) }
             'E'  { $stepIdx = [Math]::Min($steps.Count - 1, $stepIdx + 1) }
             'C'  { if ($attX) { $tgtX = 1500; Send "X 1500" }; if ($attY) { $tgtY = 1500; Send "Y 1500" } }
