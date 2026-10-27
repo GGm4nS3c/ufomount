@@ -37,8 +37,9 @@ python scripts/ptz_gui.py --port COM5            # USB
 python scripts/ptz_gui.py --port 192.168.200.50  # red
 ```
 
-En la GUI, el desplegable de puerto ofrece los COM detectados y
-`192.168.200.50:5000`; también se puede escribir otra `IP:puerto`. La GUI
+En la GUI, el desplegable de puerto ofrece los COM detectados, la IP de
+respaldo `192.168.200.50:5000` y las monturas que encuentre *Buscar*;
+también se puede escribir otra `IP:puerto`. La GUI
 recuerda el último puerto que conectó (en `~/.ufomount_ptz.json`, junto con
 los límites del tilt).
 
@@ -77,19 +78,28 @@ Para que la cámara no tope, el eje Y solo recorre de **-50°** (suelo) a
 
 | Parámetro | Valor (en `ptztest.ino`) |
 |---|---|
-| IP fija | 192.168.200.50 / 255.255.255.0, gateway 192.168.200.254 |
+| IP | Por **DHCP** al encender; si no hay servidor DHCP en 8 s, IP fija de respaldo 192.168.200.50 / 24 (gateway .254) |
 | Puerto TCP | 5000 |
+| Descubrimiento | UDP 5000: a `UFOMOUNT?` contesta `UFOMOUNT PTZ v4.1 ip=<ip>:5000 ...` |
 | MAC | 02:55:46:4F:00:01 (administrada localmente) |
 
+- **Encontrar la montura**: botón *Buscar* de la GUI (o
+  `python scripts/ptz_gui.py --find`). Busca en la red local y, si en
+  *Puerto* hay una IP de otra red (por ejemplo `192.168.210.0`), recorre
+  también esa red /24: el broadcast no cruza routers.
+- Para que tenga siempre la misma IP, reservarla en el router (DHCP) para
+  la MAC de arriba. La red se toma al encender: al cambiarla de red,
+  reiniciar la placa.
 - Mismo protocolo que por USB (`PING`, `X <us>`, `STATUS`…), una línea por
-  comando. `NET` informa el chip de la shield, el enlace y el cliente.
+  comando. `NET` informa el chip de la shield, el enlace, la IP (dhcp o
+  fija) y el cliente.
 - USB y red funcionan a la vez. Una conexión TCP a la vez: una nueva
   reemplaza a la anterior.
 - Si la conexión TCP que movía la montura se cae, o su canal deja de
   hablar con el watchdog activo, la montura se detiene.
 - Por red el UNO **no** se resetea al conectar (por USB sí): conserva su
   posición.
-- Prueba manual: PuTTY en modo *Raw* a 192.168.200.50, puerto 5000.
+- Prueba manual: PuTTY en modo *Raw* a la IP de la montura, puerto 5000.
 - Sin autenticación: pensado para una LAN de confianza.
 
 ## Conexionado

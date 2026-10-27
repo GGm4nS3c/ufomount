@@ -10,6 +10,7 @@ Uso:
     python scripts/ptz_gui.py --port COM7           # por USB
     python scripts/ptz_gui.py --port 192.168.200.50 # por red (puerto 5000)
     python scripts/ptz_gui.py --check               # prueba de conexion sin GUI (COM5)
+    python scripts/ptz_gui.py --find 192.168.210.0  # busca monturas (aqui y en esa red)
 
 La posicion mostrada es la ESTIMADA (lazo abierto): el firmware sabe
 donde comando al servo; el servo no tiene salida de telemetria real.
@@ -21,6 +22,7 @@ import math
 import os
 import queue
 import re
+import socket
 import sys
 import threading
 import time
@@ -49,9 +51,13 @@ except ImportError:
 PORT_DEFAULT = "COM5"
 BAUD = 115200
 BOOT_WAIT_S = 2.5          # el UNO se resetea al abrir el puerto
-NET_DEFAULT = "192.168.200.50:5000"   # shield Ethernet (IP fija del firmware)
+NET_DEFAULT = "192.168.200.50:5000"   # IP de respaldo del firmware (sin DHCP)
 NET_TCP_PORT = 5000
 NET_WAIT_S = 0.3           # por red no hay reset: solo esperar el saludo
+DISCOVERY_PORT = 5000      # UDP: "UFOMOUNT?" -> la montura contesta su IP
+DISCOVERY_MSG = b"UFOMOUNT?"
+DISCOVERY_WAIT_S = 1.5
+IP_RE = re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}\b")
 
 X_MIN, X_MAX = 500, 2500   # pulso (us)
 Y_MIN, Y_MAX = 500, 2500
@@ -150,6 +156,52 @@ def load_y_lim():
 
 def save_y_lim(lo, hi):
     save_cfg(y_lim=[lo, hi])
+
+
+def ip_hints(text):
+    """IPs validas dentro de un texto ("192.168.210.0", "10.0.0.7:5000")."""
+    return [ip for ip in IP_RE.findall(text or "")
+            if all(int(o) <= 255 for o in ip.split(".")) and ip != "0.0.0.0"]
+
+
+def local_ipv4():
+    try:
+        ips = socket.gethostbyname_ex(socket.gethostname())[2]
+    except OSError:
+        return []
+    return [ip for ip in ips if not ip.startswith(("127.", "169.254."))]
+
+
+def discover(hints=(), wait=DISCOVERY_WAIT_S):
+    """Busca monturas: devuelve {ip: respuesta del firmware}.
+
+    Pregunta por broadcast en cada red local y, para la red /24 de cada IP
+    de `hints`, a cada direccion una por una: el broadcast no cruza routers.
+    """
+    targets = {"255.255.255.255"}
+    targets.update(ip.rsplit(".", 1)[0] + ".255" for ip in local_ipv4())
+    for net in {ip.rsplit(".", 1)[0] for ip in hints}:
+        targets.update(f"{net}.{i}" for i in range(1, 255))
+    found = {}
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        s.bind(("", 0))
+        for t in targets:
+            try:
+                s.sendto(DISCOVERY_MSG, (t, DISCOVERY_PORT))
+            except OSError:
+                pass   # red inalcanzable desde este equipo
+        s.settimeout(0.2)
+        end = time.time() + wait
+        while time.time() < end:
+            try:
+                data, (ip, _) = s.recvfrom(256)
+            except (socket.timeout, ConnectionResetError):
+                continue   # Windows: un "puerto cerrado" por ICMP no corta la busqueda
+            text = data.decode("ascii", errors="replace").strip()
+            if text.startswith("UFOMOUNT"):
+                found[ip] = text
+    return found
 
 
 def is_net_port(port):
@@ -324,6 +376,7 @@ class PtzGui:
         self.last_tx = 0.0
         self.awaiting_reply = False
         self.pong_ok = False
+        self._pong_late = False
         self._speed_job = None
         self._handshake_job = None
         self._pending_y = None                   # (y_us, ts) goto secuencial
@@ -372,7 +425,7 @@ class PtzGui:
         # ---- barra superior: conexion ----
         top = ttk.Frame(r, style="Panel.TFrame", padding=8)
         top.grid(row=0, column=0, columnspan=2, sticky="ew", padx=8, pady=(8, 4))
-        top.columnconfigure(5, weight=1)
+        top.columnconfigure(6, weight=1)
 
         ttk.Label(top, text="UFOMOUNT PTZ", style="Panel.TLabel",
                   font=("Segoe UI", 13, "bold")).grid(row=0, column=0, padx=(2, 14))
@@ -384,8 +437,10 @@ class PtzGui:
         ttk.Button(top, text="↻", width=3,
                    command=lambda: self.port_cb.configure(values=self._ports())
                    ).grid(row=0, column=3)
+        self.find_btn = ttk.Button(top, text="Buscar", command=self.find_mounts)
+        self.find_btn.grid(row=0, column=4, padx=(4, 0))
         self.conn_btn = ttk.Button(top, text="Conectar", command=self.toggle_conn)
-        self.conn_btn.grid(row=0, column=4, padx=8)
+        self.conn_btn.grid(row=0, column=5, padx=8)
         # bateria del mando: solo aparece con un mando conectado
         self.batt_box = tk.Frame(top, bg=C_PANEL)
         tk.Label(self.batt_box, text="mando", bg=C_PANEL, fg=C_MUTED,
@@ -393,11 +448,11 @@ class PtzGui:
         self.batt_cv = tk.Canvas(self.batt_box, width=38, height=18,
                                  bg=C_PANEL, highlightthickness=0)
         self.batt_cv.pack(side="left")
-        self.batt_box.grid(row=0, column=5, sticky="e", padx=10)
+        self.batt_box.grid(row=0, column=6, sticky="e", padx=10)
         self.batt_box.grid_remove()
         self.conn_lbl = tk.Label(top, text="desconectado", bg=C_PANEL2,
                                  fg=C_MUTED, padx=10, pady=2)
-        self.conn_lbl.grid(row=0, column=6, sticky="e", padx=2)
+        self.conn_lbl.grid(row=0, column=7, sticky="e", padx=2)
 
         # ---- columna izquierda: controles ----
         left = ttk.Frame(r, style="Panel.TFrame", padding=10)
@@ -596,6 +651,35 @@ class PtzGui:
         usb = [p.device for p in list_ports.comports()] or [PORT_DEFAULT]
         return usb + [NET_DEFAULT]
 
+    # ------------------------- buscar monturas ------------------------------
+    def find_mounts(self):
+        # la IP escrita en Puerto (o la ultima que conecto) senala que otra
+        # red recorrer, p. ej. "192.168.210.0" para la red 192.168.210.x
+        hints = set(ip_hints(self.port_var.get()))
+        hints.update(ip_hints(load_cfg().get("port", "")))
+        nets = sorted({ip.rsplit(".", 1)[0] + ".x" for ip in hints})
+        self.log_line("buscando monturas en la red local"
+                      + (f" y en {', '.join(nets)}" if nets else "") + "...",
+                      "info")
+        self.find_btn.configure(state="disabled")
+        threading.Thread(target=lambda: self.rxq.put(("found", discover(hints))),
+                         daemon=True).start()
+
+    def _show_found(self, found):
+        self.find_btn.configure(state="normal")
+        if not found:
+            self.log_line("no se encontro ninguna montura. Si esta en otra red, "
+                          "escribe en Puerto una IP de esa red (p. ej. "
+                          "192.168.210.0) y vuelve a Buscar", "warn")
+            return
+        ports = [f"{ip}:{NET_TCP_PORT}" for ip in sorted(found)]
+        for ip in sorted(found):
+            self.log_line(f"encontrada en {ip}: {found[ip]}", "rx")
+        self.port_cb.configure(values=ports + self._ports())
+        if not self.link.connected:
+            self.port_var.set(ports[0])
+            self.log_line(f"puerto -> {ports[0]}: pulsa Conectar", "info")
+
     # ------------------------------- log -----------------------------------
     def log_line(self, text, tag="info"):
         ts = time.strftime("%H:%M:%S")
@@ -649,6 +733,7 @@ class PtzGui:
         self.move_sent = {"X": 0.0, "Y": 0.0}
         self._pending_y = None
         self.pong_ok = False
+        self._pong_late = False
         self.awaiting_reply = False
 
     def _handshake(self):
@@ -684,6 +769,7 @@ class PtzGui:
                           f", watchdog {WDT_MS} ms, tilt Y "
                           f"{self.y_lim[0]:+g}° a {self.y_lim[1]:+g}°", "info")
         else:
+            self._pong_late = True
             self.conn_lbl.configure(text="sin respuesta del firmware",
                                     fg=C_WARN)
             self.log_line("no llego PONG: ¿es el puerto correcto? "
@@ -1075,6 +1161,9 @@ class PtzGui:
                 if kind == "lost":
                     self.disconnect("conexion perdida")
                     continue
+                if kind == "found":
+                    self._show_found(line)
+                    continue
                 if line.startswith(("OK", "ERR", "PONG")):
                     self.awaiting_reply = False
                 m = STATUS_RE.match(line)
@@ -1085,6 +1174,9 @@ class PtzGui:
                 elif line.startswith("PONG"):
                     self.pong_ok = True
                     self.log_line(f"< {line}", "rx")
+                    if self._pong_late:   # p. ej. el UNO aun esperaba DHCP
+                        self._pong_late = False
+                        self._check_pong()
                 elif line.startswith("ERR"):
                     self.log_line(f"< {line}", "err")
                 elif line.startswith("AUTO DETACH"):
@@ -1318,11 +1410,21 @@ def main():
     ap = argparse.ArgumentParser(description="Control PTZ ufomount")
     ap.add_argument("--check", action="store_true",
                     help="prueba de conexion sin GUI")
+    ap.add_argument("--find", nargs="?", const="", metavar="IP",
+                    help="busca monturas en la red local (y en la red /24 de "
+                         "IP, si se da) y sale")
     ap.add_argument("--port", default=None,
                     help="COMx (USB) o IP[:puerto] (red, puerto 5000 por "
                          "defecto); sin indicar: el ultimo que conecto o la "
                          "red")
     args = ap.parse_args()
+    if args.find is not None:
+        found = discover(set(ip_hints(args.find)))
+        for ip, text in sorted(found.items()):
+            print(f"{ip}  {text}")
+        if not found:
+            print("ninguna montura encontrada")
+        return
     if args.check:
         check_mode(args.port or PORT_DEFAULT)
         return

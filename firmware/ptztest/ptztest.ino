@@ -1,11 +1,19 @@
-// Firmware PTZ ufomount v4 (2 servos GXservo GX3350ProBLS "X50 Pro").
+// Firmware PTZ ufomount v4.1 (2 servos GXservo GX3350ProBLS "X50 Pro").
 // Eje X (pan, 270 grados) en D2 - Eje Y (tilt, 180 grados) en D3.
+//
+// v4.1, IP por DHCP:
+//  - Al arrancar pide IP por DHCP (8 s); si nadie contesta usa la IP fija
+//    de respaldo 192.168.200.50 (sirve con un cable directo PC-montura).
+//    La red se elige al encender: cambiar de red = reiniciar la placa.
+//  - Descubrimiento: a un "UFOMOUNT?" por UDP al puerto 5000 (broadcast o
+//    directo) contesta "UFOMOUNT PTZ v4.1 ip=<ip>:5000 ...". La GUI lo usa
+//    en su boton Buscar.
 //
 // v4, control por red con shield Ethernet (W5100/W5200/W5500):
 //  - Servos en D2 (X) y D3 (Y): la shield usa D10 como chip-select del
 //    controlador de red (D11-D13 son el SPI y D4 la SD), y D8/D9 quedaban
 //    junto a D10, en el extremo del conector que peor calza con la shield.
-//  - Servidor TCP en 192.168.200.50:5000 con el mismo protocolo de lineas
+//  - Servidor TCP en el puerto 5000 con el mismo protocolo de lineas
 //    que el puerto serie; USB y red funcionan a la vez.
 //  - Una conexion TCP a la vez: una nueva reemplaza a la anterior, asi un
 //    socket colgado nunca deja la montura sin control.
@@ -39,7 +47,7 @@
 //   IDLE <ms>             -> auto-detach tras inactividad (0 = nunca)
 //   WDT <ms>              -> watchdog de enlace (0 = off, por defecto off)
 //   STATUS                -> estado (parseable por la GUI)
-//   NET                   -> chip de red, enlace, IP y cliente TCP
+//   NET                   -> chip de red, enlace, IP (dhcp/fija) y cliente TCP
 
 #include <Servo.h>
 #include <SPI.h>
@@ -51,13 +59,16 @@ const uint8_t PIN_X = 2;
 const uint8_t PIN_Y = 3;
 const uint8_t PIN_SD_CS = 4;   // SD de la shield: se deja deseleccionada
 
-// Red (IP fija). MAC administrada localmente (bit 0x02): no choca con
-// ningun fabricante; cambiar el ultimo byte si hay dos monturas en la red.
+// Red. MAC administrada localmente (bit 0x02): no choca con ningun
+// fabricante; cambiar el ultimo byte si hay dos monturas en la red. Para
+// que el router le de siempre la misma IP, reservarla para esta MAC.
 byte MAC[] = {0x02, 0x55, 0x46, 0x4F, 0x00, 0x01};
-const IPAddress NET_IP(192, 168, 200, 50);
-const IPAddress NET_GW(192, 168, 200, 254);
-const IPAddress NET_MASK(255, 255, 255, 0);
+const IPAddress FALLBACK_IP(192, 168, 200, 50);   // sin servidor DHCP
+const IPAddress FALLBACK_GW(192, 168, 200, 254);
+const IPAddress FALLBACK_MASK(255, 255, 255, 0);
+const unsigned long DHCP_TIMEOUT_MS = 8000;
 const uint16_t TCP_PORT = 5000;
+const uint16_t DISCOVERY_PORT = 5000;             // UDP
 
 const uint16_t CENTER_US = 1500;
 const uint16_t HARD_MIN_US = 500;   // rango completo confirmado del servo
@@ -92,7 +103,9 @@ LineBuf rxTcp = {{0}, 0};
 
 EthernetServer server(TCP_PORT);
 EthernetClient client;                         // conexion TCP vigente
+EthernetUDP discovery;
 bool netOk = false;
+bool dhcpOk = false;                           // false = IP fija de respaldo
 
 // Junta la salida hacia el cliente TCP y la manda de a una linea por
 // paquete (sin esto cada print() seria un segmento TCP aparte).
@@ -118,17 +131,22 @@ void setup() {
 
   pinMode(PIN_SD_CS, OUTPUT);
   digitalWrite(PIN_SD_CS, HIGH);   // que la SD no conteste en el bus SPI
-  Ethernet.begin(MAC, NET_IP, NET_GW, NET_GW, NET_MASK);   // dns = gateway
+  Serial.println(F("NET pidiendo IP por DHCP..."));
+  dhcpOk = Ethernet.begin(MAC, DHCP_TIMEOUT_MS, 4000);
   netOk = Ethernet.hardwareStatus() != EthernetNoHardware;
   if (netOk) {
+    if (!dhcpOk) {
+      Ethernet.begin(MAC, FALLBACK_IP, FALLBACK_GW, FALLBACK_GW, FALLBACK_MASK);
+    }
     // LAN: reintentos cortos, asi un cliente muerto no congela el loop
     // ~50 s esperando ACKs con los valores por defecto.
     Ethernet.setRetransmissionTimeout(100);
     Ethernet.setRetransmissionCount(3);
     server.begin();
+    discovery.begin(DISCOVERY_PORT);
   }
 
-  Serial.println(F("UFOMOUNT PTZ v4 LISTO"));
+  Serial.println(F("UFOMOUNT PTZ v4.1 LISTO"));
   printNet(Serial);
 }
 
@@ -222,6 +240,7 @@ void printNet(Print &out) {
   }
   out.print(F(" ip=")); out.print(Ethernet.localIP());
   out.print(':'); out.print(TCP_PORT);
+  out.print(dhcpOk ? F(" (dhcp)") : F(" (fija)"));
   out.print(F(" cliente=")); out.println(client.connected() ? 1 : 0);
 }
 
@@ -370,7 +389,7 @@ void serviceNet(unsigned long now) {
     client = nc;
     rxTcp.len = 0;
     lastCmdMs[SRC_TCP] = now;
-    tcpOut.println(F("UFOMOUNT PTZ v4 LISTO (TCP)"));
+    tcpOut.println(F("UFOMOUNT PTZ v4.1 LISTO (TCP)"));
     Serial.println(F("NET cliente conectado"));
   }
 
@@ -385,6 +404,23 @@ void serviceNet(unsigned long now) {
   while ((n = client.read(chunk, sizeof(chunk))) > 0) {
     for (int i = 0; i < n; i++) feed(rxTcp, chunk[i], tcpOut, SRC_TCP, now);
   }
+}
+
+// Descubrimiento: la GUI pregunta "UFOMOUNT?" por UDP (broadcast en su red
+// o a cada IP de otra red) y la montura contesta a quien pregunto.
+void serviceDiscovery() {
+  if (!netOk || discovery.parsePacket() <= 0) return;
+  char q[10];
+  int n = discovery.read((uint8_t *)q, sizeof(q) - 1);
+  q[n > 0 ? n : 0] = '\0';
+  if (strcmp(q, "UFOMOUNT?") != 0) return;
+  discovery.beginPacket(discovery.remoteIP(), discovery.remotePort());
+  discovery.print(F("UFOMOUNT PTZ v4.1 ip="));
+  discovery.print(Ethernet.localIP());
+  discovery.print(':'); discovery.print(TCP_PORT);
+  discovery.print(dhcpOk ? F(" dhcp") : F(" fija"));
+  discovery.print(F(" cliente=")); discovery.print(client.connected() ? 1 : 0);
+  discovery.endPacket();
 }
 
 void slewAxis(bool att, uint16_t &cur, uint16_t tgt, uint16_t rate,
@@ -413,6 +449,8 @@ void loop() {
     feed(rxSerial, Serial.read(), Serial, SRC_SERIAL, now);
   }
   serviceNet(now);
+  serviceDiscovery();
+  if (dhcpOk) Ethernet.maintain();   // renueva el prestamo de la IP
 
   if (now - lastTick >= 20) {
     lastTick = now;
