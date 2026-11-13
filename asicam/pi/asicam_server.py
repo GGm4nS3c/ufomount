@@ -624,8 +624,13 @@ class ThreadedTCP(socketserver.ThreadingMixIn, socketserver.TCPServer):
 class App:
     def __init__(self, args):
         self.args = args
-        self.sdk = Z.SDK(args.sdk)
-        log.info("asicam %s, SDK ZWO %s (%s)", VERSION, self.sdk.version, args.sdk)
+        if args.simulate:
+            import fake_camera
+            self.sdk = fake_camera.FakeSDK()
+            log.info("asicam %s con CAMARA SIMULADA", VERSION)
+        else:
+            self.sdk = Z.SDK(args.sdk)
+            log.info("asicam %s, SDK ZWO %s (%s)", VERSION, self.sdk.version, args.sdk)
         self.settings = Settings(args.config)
         self.capturer = Capturer(self.sdk, self.settings, args.camera, args.rt)
         self.stop_event = threading.Event()
@@ -637,6 +642,7 @@ class App:
         cap = self.capturer
         if cmd == "hello":
             return {"ok": True, "server": "asicam", "version": VERSION, "sdk": self.sdk.version,
+                    "host": socket.gethostname(),
                     "ports": {"control": self.args.ctrl_port, "data": self.args.data_port},
                     "frame_header": {"size": FRAME_HDR.size, "version": FRAME_VERSION,
                                      "format": str(FRAME_HDR.format)}}
@@ -766,6 +772,7 @@ def main(argv=None):
     p.add_argument("--config", default=os.path.expanduser("~/.config/asicam/settings.json"),
                    help="archivo JSON donde se guardan los ajustes")
     p.add_argument("--rt", action="store_true", help="captura con prioridad de tiempo real (requiere root)")
+    p.add_argument("--simulate", action="store_true", help="camara simulada, para probar sin hardware")
     p.add_argument("--debug", action="store_true")
     args = p.parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO,

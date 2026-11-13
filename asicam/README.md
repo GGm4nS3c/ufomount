@@ -12,7 +12,7 @@ Probado con una **ZWO ASI220MM Mini** en una Raspberry Pi 4 con Astroberry
 | Fase | Contenido | Estado |
 |---|---|---|
 | 1 | Servidor en la Pi: captura, control, datos, búsqueda | **hecha y verificada** |
-| 2 | Librería cliente en el PC (cuadros como arreglos numpy) | pendiente |
+| 2 | Librería cliente en el PC (cuadros como arreglos numpy) | **hecha y verificada** |
 | 3 | Interfaz en el PC con ajustes tipo ASIStudio | pendiente |
 | 4 | Robustez: driver 1.26 para exposiciones largas, prueba larga | pendiente |
 | 5 | Servicio en la Pi (arranque automático, tiempo real) | pendiente |
@@ -23,11 +23,14 @@ Probado con una **ZWO ASI220MM Mini** en una Raspberry Pi 4 con Astroberry
 asicam/
   pi/asicam_server.py     servidor (corre en la Raspberry)
   pi/zwo_sdk.py           acceso al SDK de ZWO por ctypes
-  tools/check_server.py   verificación de punta a punta desde el PC
+  pi/fake_camera.py       cámara simulada (--simulate), para probar sin hardware
+  pc/asicam_client.py     librería y línea de comandos para el PC
+  tools/check_server.py   verificación del servidor (protocolo crudo)
+  tools/test_client.py    pruebas de la librería del PC
 ```
 
 El servidor solo usa la biblioteca estándar de Python (3.7 o más nuevo) y el SDK de ZWO
-(`libASICamera2.so`). No instala nada.
+(`libASICamera2.so`). No instala nada. La librería del PC necesita **numpy**.
 
 ## Uso en la Raspberry
 
@@ -50,14 +53,88 @@ Con prioridad de tiempo real (permite más fps sin perder cuadros; requiere root
 cd ~/asicam && sudo python3 asicam_server.py --rt --config /home/astroberry/.config/asicam/settings-rt.json
 ```
 
-Opciones: `--sdk RUTA` (o variable `ASICAM_SDK`) elige la biblioteca de ZWO. Por defecto usa
+Opciones: `--simulate` usa una cámara simulada (ver más abajo). `--sdk RUTA` (o variable
+`ASICAM_SDK`) elige la biblioteca de ZWO. Por defecto usa
 la 1.39 de `~/scripts/ASI_linux_mac_SDK_V1.39/lib/armv7/` si existe, y si no, la del sistema.
 Los ajustes se guardan en `~/.config/asicam/settings.json` y se recuperan al reiniciar.
 
 **La cámara se abre solo mientras hay clientes de datos conectados.** Unos 5 s después de que
 se va el último cliente, el servidor la suelta y queda libre para PHD2, KStars o INDI.
 
-## Verificación desde el PC
+## Uso desde el PC (librería)
+
+```python
+import sys; sys.path.insert(0, "asicam/pc")
+from asicam_client import AsiCam, discover, save_fits
+
+print(discover())                          # servidores en la red
+with AsiCam("192.168.200.159") as cam:
+    cam.info()                             # cámara y rangos de cada ajuste
+    cam.set(exposure_us=27000, gain=0)     # en vivo; error -> AsiCamError
+    cam.start()                            # recibe en segundo plano
+    f = cam.get_frame(timeout=2)           # siguiente cuadro (o None)
+    f.image                                # numpy (alto, ancho): uint8 o uint16
+    f.pixels()                             # RAW16 -> valores reales 0..4095
+    f.seq, f.timestamp, f.exposure_us, f.gain, f.temperature_c
+    save_fits("foto.fits", f)              # también save_pgm(), o numpy.save()
+    cam.stats()                            # fps, recibidos, huecos, descartes, reconexiones
+```
+
+- `get_frame()` entrega los cuadros en orden desde una cola corta (4 por defecto). Si el
+  programa se atrasa, se descartan los más viejos (`stats()["dropped_local"]`) y el flujo sigue.
+- `latest()` da el último cuadro sin esperar; `on_frame(fn)` llama a `fn(cuadro)` en el hilo
+  receptor (debe ser rápida).
+- Si el servidor se reinicia o se corta la red, el cliente se reconecta solo (control y datos).
+- Después de un cambio de geometría, los cuadros que ya estaban en la cola llegan con el tamaño
+  anterior: revisar `f.image.shape`.
+- `f.latency` compara la hora de la Pi con la del PC: solo sirve si los dos relojes están en
+  hora (en las pruebas, el PC iba 0,55 s atrasado y daba latencias negativas).
+
+Línea de comandos:
+
+```bash
+python asicam/pc/asicam_client.py find
+```
+
+```bash
+python asicam/pc/asicam_client.py --host 192.168.200.159 set exposure_us=27000 gain=0 auto_exposure=false
+```
+
+```bash
+python asicam/pc/asicam_client.py --host 192.168.200.159 stream 10
+```
+
+```bash
+python asicam/pc/asicam_client.py --host 192.168.200.159 snap foto.fits
+```
+
+Otros comandos: `info`, `status`, `get`. `snap` guarda `.fits`, `.pgm` o `.npy` según la extensión.
+
+## Probar sin la Pi (cámara simulada)
+
+```bash
+python asicam/pi/asicam_server.py --simulate --bind 127.0.0.1 --config sim.json
+```
+
+Imita una ASI220MM Mini (mismos ajustes, ~14 fps a 1080p, RAW16 de 12 bits, punto que se
+mueve, y se "traba" con ancho de banda ≥ 80 % como la real). Sirve para desarrollar la interfaz
+y el procesamiento en el PC.
+
+## Verificación
+
+Librería del PC, con servidor simulado local (incluye reconexión):
+
+```bash
+python asicam/tools/test_client.py --simulate
+```
+
+Librería del PC contra la Pi real:
+
+```bash
+python asicam/tools/test_client.py 192.168.200.159
+```
+
+Servidor, a nivel de protocolo:
 
 ```bash
 python asicam/tools/check_server.py
@@ -67,9 +144,10 @@ python asicam/tools/check_server.py
 python asicam/tools/check_server.py 192.168.200.159 --stress
 ```
 
-Sin IP, busca el servidor en la red. Con IP, va directo. `--quick` hace solo lo básico;
-`--stress` además fuerza pérdidas de cuadros para probar la recuperación automática.
-Al terminar deja los ajustes como estaban.
+`check_server.py`: sin IP busca el servidor en la red; con IP va directo. `--quick` hace solo
+lo básico; `--stress` además fuerza pérdidas de cuadros para probar la recuperación
+automática. `test_client.py` acepta `--restart-cmd "programa args"` para probar la reconexión
+contra la Pi. Todas las pruebas dejan los ajustes del servidor como estaban.
 
 ## Protocolo
 
@@ -99,7 +177,7 @@ corta la conexión.
 
 | Comando | Qué hace |
 |---|---|
-| `{"cmd": "hello"}` | versión del servidor y del SDK, puertos y tamaño de la cabecera de cuadro |
+| `{"cmd": "hello"}` | versión del servidor y del SDK, nombre del equipo, puertos y tamaño de la cabecera de cuadro |
 | `{"cmd": "info"}` | datos de la cámara (tamaño, formatos, bins, bits) y rango de cada ajuste |
 | `{"cmd": "get"}` | ajustes actuales |
 | `{"cmd": "set", "settings": {...}}` | cambia uno o más ajustes; se valida todo antes de aplicar |
