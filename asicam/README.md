@@ -13,7 +13,7 @@ Probado con una **ZWO ASI220MM Mini** en una Raspberry Pi 4 con Astroberry
 |---|---|---|
 | 1 | Servidor en la Pi: captura, control, datos, búsqueda | **hecha y verificada** |
 | 2 | Librería cliente en el PC (cuadros como arreglos numpy) | **hecha y verificada** |
-| 3 | Interfaz en el PC con ajustes tipo ASIStudio | pendiente |
+| 3 | Interfaz en el PC con ajustes tipo ASIStudio (`UfomountCam.exe`) | **hecha y verificada** |
 | 4 | Robustez: driver 1.26 para exposiciones largas, prueba larga | pendiente |
 | 5 | Servicio en la Pi (arranque automático, tiempo real) | pendiente |
 
@@ -25,6 +25,7 @@ asicam/
   pi/zwo_sdk.py           acceso al SDK de ZWO por ctypes
   pi/fake_camera.py       cámara simulada (--simulate), para probar sin hardware
   pc/asicam_client.py     librería y línea de comandos para el PC
+  pc/asicam_gui.py        interfaz: vista en vivo, histograma, ajustes, foto y video
   tools/check_server.py   verificación del servidor (protocolo crudo)
   tools/test_client.py    pruebas de la librería del PC
 ```
@@ -60,6 +61,45 @@ Los ajustes se guardan en `~/.config/asicam/settings.json` y se recuperan al rei
 
 **La cámara se abre solo mientras hay clientes de datos conectados.** Unos 5 s después de que
 se va el último cliente, el servidor la suelta y queda libre para PHD2, KStars o INDI.
+
+## Interfaz (UFOMOUNT CAM)
+
+`UfomountCam.exe` (o `python asicam/pc/asicam_gui.py`). Arriba: servidor, **Buscar** y
+**Conectar**. A la izquierda el video; a la derecha, como en ASIStudio:
+
+| Sección | Qué tiene |
+|---|---|
+| Cámara | modelo, tamaño, bits, píxel, temperatura del sensor |
+| Imagen | formato RAW8/RAW16, bin, resolución (recorte centrado) |
+| Histograma | mín, máx, promedio y % saturado; escala log |
+| Control | exposición (en ms, con rangos como ASIStudio y deslizador logarítmico) y ganancia, ambos con Auto |
+| Avanzado | offset, ancho de banda USB (y Auto), High speed, voltear, límites del modo automático |
+| Vista | estirado lineal o automático, zoom ajustar o 1:1 (doble clic; arrastrar para mover), cruz central |
+| Captura | foto FITS o PGM, video `.ser` (sin límite, por segundos o por cuadros) |
+
+Abajo: fps recibidos y mostrados, Mbit/s, huecos, descartes y reinicios del servidor, y el
+valor del píxel bajo el mouse. Las fotos y videos van a `Imágenes\asicam` (se puede cambiar).
+Recuerda el último servidor y las preferencias de vista en `~/.asicam_gui.json`.
+
+El video `.ser` guarda los cuadros crudos (8 o 16 bits) con la hora de cada uno; lo abren
+SER Player, PIPP, AutoStakkert, Siril, etc. Mientras se graba no se puede cambiar la geometría.
+
+Para regenerar el ejecutable (desde la raíz del repositorio; queda en `dist/`):
+
+```bash
+python -m PyInstaller --noconfirm --onefile --windowed --name UfomountCam asicam/pc/asicam_gui.py
+```
+
+Prueba automática de la interfaz (maneja los controles como un usuario y sale con código 0 si
+todo anda):
+
+```bash
+python asicam/pc/asicam_gui.py --simulate --selftest
+```
+
+```bash
+python asicam/pc/asicam_gui.py --host 192.168.200.159 --selftest
+```
 
 ## Uso desde el PC (librería)
 
