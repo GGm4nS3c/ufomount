@@ -1,8 +1,12 @@
 # asicam: la Raspberry como relay de video de una cámara ZWO ASI
 
-Módulo aparte del proyecto ufomount (se fusionará más adelante con el control PTZ).
+Módulo aparte del proyecto ufomount (se fusionará más adelante con la GUI PTZ).
 La Raspberry captura los cuadros **crudos** de la cámara (RAW8/RAW16, sin comprimir)
 y los reenvía por red. Todo el procesamiento se hace en el PC que se conecta.
+
+El mismo servidor también **maneja los servos de la montura** con el PWM de la Pi, en lugar
+del Arduino, con el mismo protocolo que el firmware v4.1: `scripts/ptz_gui.py` /
+`UfomountPTZ.exe` funcionan sin cambios (ver [Control PTZ](#control-ptz-servos)).
 
 Probado con una **ZWO ASI220MM Mini** en una Raspberry Pi 4 con Astroberry
 (Raspbian Buster de 32 bits, Python 3.7) y el SDK de ZWO 1.39.
@@ -14,6 +18,7 @@ Probado con una **ZWO ASI220MM Mini** en una Raspberry Pi 4 con Astroberry
 | 1 | Servidor en la Pi: captura, control, datos, búsqueda | **hecha y verificada** |
 | 2 | Librería cliente en el PC (cuadros como arreglos numpy) | **hecha y verificada** |
 | 3 | Interfaz en el PC con ajustes tipo ASIStudio (`UfomountCam.exe`) | **hecha y verificada** |
+| PTZ | Servos X/Y desde la Pi (reemplaza al Arduino), protocolo del firmware v4.1 | **hecho y verificado** |
 | 4 | Robustez: driver 1.26 para exposiciones largas, prueba larga | pendiente |
 | 5 | Servicio en la Pi (arranque automático, tiempo real) | pendiente |
 
@@ -24,10 +29,12 @@ asicam/
   pi/asicam_server.py     servidor (corre en la Raspberry)
   pi/zwo_sdk.py           acceso al SDK de ZWO por ctypes
   pi/fake_camera.py       cámara simulada (--simulate), para probar sin hardware
+  pi/ptz.py               control de los servos (firmware v4.1 pasado a Python)
   pc/asicam_client.py     librería y línea de comandos para el PC
   pc/asicam_gui.py        interfaz: vista en vivo, histograma, ajustes, foto y video
   tools/check_server.py   verificación del servidor (protocolo crudo)
   tools/test_client.py    pruebas de la librería del PC
+  tools/check_ptz.py      pruebas del control PTZ
 ```
 
 El servidor solo usa la biblioteca estándar de Python (3.7 o más nuevo) y el SDK de ZWO
@@ -38,7 +45,7 @@ El servidor solo usa la biblioteca estándar de Python (3.7 o más nuevo) y el S
 Copiar los archivos (desde la raíz del repositorio, en el PC):
 
 ```bash
-scp asicam/pi/asicam_server.py asicam/pi/zwo_sdk.py astroberry@astroberry.local:asicam/
+scp asicam/pi/asicam_server.py asicam/pi/zwo_sdk.py asicam/pi/ptz.py astroberry@astroberry.local:asicam/
 ```
 
 Arrancar el servidor en la Pi:
@@ -61,6 +68,42 @@ Los ajustes se guardan en `~/.config/asicam/settings.json` y se recuperan al rei
 
 **La cámara se abre solo mientras hay clientes de datos conectados.** Unos 5 s después de que
 se va el último cliente, el servidor la suelta y queda libre para PHD2, KStars o INDI.
+
+## Control PTZ (servos)
+
+El servidor maneja los dos servos de la montura con el **PWM por hardware** de la Pi: los
+pulsos los genera el chip, así que no tiemblan aunque la Pi esté ocupada con la cámara. Es el
+firmware v4.1 del Arduino (`firmware/ptztest/ptztest.ino`) pasado a Python, con el mismo
+protocolo, por eso la GUI PTZ (`scripts/ptz_gui.py`, `UfomountPTZ.exe`) lo encuentra con
+**Buscar** y lo maneja sin cambios.
+
+Conexión (el rojo de los servos sigue en su fuente de 7,5 V, nunca en la Pi):
+
+| Servo | Cable | Pin de la Pi |
+|---|---|---|
+| X (pan) | señal | pin 12 (GPIO18, PWM canal 0) |
+| Y (tilt) | señal | pin 33 (GPIO13, PWM canal 1) |
+| ambos | negativo | pin 14 o 34 (GND) |
+
+Los GX3350 funcionan con la señal de 3,3 V de la Pi. Una resistencia de 470 Ω a 1 kΩ en serie
+con cada señal protege el GPIO ante un cable mal puesto (opcional).
+
+Hay que activar el PWM una vez en `/boot/config.txt` y reiniciar (desactiva el audio analógico):
+
+```
+dtoverlay=pwm-2chan,pin=18,func=2,pin2=13,func2=4
+```
+
+El usuario tiene que estar en el grupo `gpio` (en Astroberry ya lo está). El PTZ arranca solo
+si existe `/sys/class/pwm/pwmchip0`; si algo falla, se avisa en el log y la cámara sigue
+funcionando. Opciones: `--ptz off` lo desactiva, `--ptz on` hace que un fallo detenga el
+servidor, `--ptz-port` cambia el puerto (5000), `--ptz-simulate` usa servos simulados con la
+cámara real. Al cerrar el servidor, los servos quedan sueltos.
+
+Diferencias con el Arduino: no hay canal USB (solo red), la Pi tarda unos 30 s en arrancar, y
+la búsqueda contesta `UFOMOUNT PTZ v5.0 ... raspberry`. El resto (comandos, respuestas,
+movimiento suave, límites, auto-detach, watchdog, una conexión a la vez) es igual. Ver el
+protocolo en `asicam/pi/ptz.py`.
 
 ## Interfaz (UFOMOUNT CAM)
 
@@ -189,6 +232,19 @@ lo básico; `--stress` además fuerza pérdidas de cuadros para probar la recupe
 automática. `test_client.py` acepta `--restart-cmd "programa args"` para probar la reconexión
 contra la Pi. Todas las pruebas dejan los ajustes del servidor como estaban.
 
+Control PTZ (45 pruebas: búsqueda, validación igual al firmware, movimiento suave, límites,
+STOP, watchdog, auto-detach, reemplazo de conexión, canal JSON):
+
+```bash
+python asicam/tools/check_ptz.py --simulate
+```
+
+Contra la Pi **mueve los servos** (poco y despacio alrededor del centro) y los deja sueltos:
+
+```bash
+python asicam/tools/check_ptz.py 192.168.200.159
+```
+
 ## Protocolo
 
 | Puerto | Uso |
@@ -196,6 +252,8 @@ contra la Pi. Todas las pruebas dejan los ajustes del servidor como estaban.
 | 5300/UDP | búsqueda: responde a `ASICAM?` |
 | 5300/TCP | control: una línea JSON por pedido y una por respuesta |
 | 5301/TCP | datos: cuadros crudos, cada uno con una cabecera binaria |
+| 5000/TCP | PTZ: líneas de texto del firmware de la montura (`PING`, `X 1500`, `STATUS`...) |
+| 5000/UDP | PTZ búsqueda: responde a `UFOMOUNT?` |
 
 ### Búsqueda (UDP 5300)
 
@@ -221,7 +279,8 @@ corta la conexión.
 | `{"cmd": "info"}` | datos de la cámara (tamaño, formatos, bins, bits) y rango de cada ajuste |
 | `{"cmd": "get"}` | ajustes actuales |
 | `{"cmd": "set", "settings": {...}}` | cambia uno o más ajustes; se valida todo antes de aplicar |
-| `{"cmd": "status"}` | estado, fps, cuadros, descartes, reinicios, temperatura, clientes |
+| `{"cmd": "status"}` | estado, fps, cuadros, descartes, reinicios, temperatura, clientes; `ptz` con la posición de los servos |
+| `{"cmd": "ptz", "line": "X 1600"}` | un comando PTZ, igual que por el puerto 5000; responde `replies` con las líneas |
 
 Ejemplo:
 
@@ -302,7 +361,11 @@ reintenta abrirla cada 2 s.
 | Ancho de banda 90 % (forzado) | ~5 | pierde cuadros, el servidor se recupera solo |
 
 El crudo 1080p a 14 fps ocupa unos 230 Mbit/s: necesita red **gigabit**. Un inyector PoE
-pasivo de 2 pares limita a 100 Mbps.
+pasivo de 2 pares limita a 100 Mbps (unos 5,5 fps a 1080p; con bin 2 caben los 14 fps).
+
+Moviendo los servos de ida y vuelta mientras transmite 1080p RAW8 (15 s quietos y 15 s en
+movimiento, con la GUI consultando STATUS cada 0,2 s): 14,0 fps en ambos casos, sin huecos,
+sin descartes del SDK y sin subtensión en la Pi.
 
 Pendiente (fase 4): con el SDK 1.39 las exposiciones de 110 ms o más no entregan cuadros; con
 el 1.26 del sistema sí.

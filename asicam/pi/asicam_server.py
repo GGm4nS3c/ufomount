@@ -5,16 +5,22 @@ Captura cuadros crudos (RAW8/RAW16) con el SDK de ZWO y los reenvia sin
 comprimir por TCP. El procesamiento se hace en el PC que se conecta.
 
 Puertos (por defecto):
-    5300/TCP  control: lineas JSON (hello, info, get, set, status)
+    5300/TCP  control: lineas JSON (hello, info, get, set, status, ptz)
     5301/TCP  datos:   cuadros crudos con cabecera binaria
     5300/UDP  busqueda: responde a "ASICAM?"
+    5000/TCP  PTZ: protocolo de lineas del firmware de la montura (ptz.py)
+    5000/UDP  PTZ busqueda: responde a "UFOMOUNT?"
 
 La camara se abre solo mientras hay clientes de datos conectados; sin
 clientes se suelta a los pocos segundos (queda libre para PHD2/INDI).
 
+El control PTZ (servos X e Y por el PWM de la Pi) arranca solo si existe
+/sys/class/pwm/pwmchip0; ver ptz.py. Si falla, la camara sigue funcionando.
+
 Uso:
     python3 asicam_server.py                      # SDK por defecto
     python3 asicam_server.py --sdk /ruta/libASICamera2.so.1.39
+    python3 asicam_server.py --ptz off            # sin control PTZ
     sudo python3 asicam_server.py --rt --config /home/astroberry/.config/asicam/settings-rt.json
 
 Compatible con Python 3.7. Protocolo completo en asicam/README.md.
@@ -35,9 +41,10 @@ import sys
 import threading
 import time
 
+import ptz as P
 import zwo_sdk as Z
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 CTRL_PORT = 5300
 DATA_PORT = 5301
 DISCOVERY_MSG = b"ASICAM?"
@@ -635,6 +642,28 @@ class App:
         self.capturer = Capturer(self.sdk, self.settings, args.camera, args.rt)
         self.stop_event = threading.Event()
         self.threads = []
+        self.ptz = None   # PtzService o None
+
+    def _start_ptz(self):
+        """Arranca el control PTZ. En modo auto un fallo solo se avisa: la camara sigue."""
+        a = self.args
+        if a.ptz == "off":
+            return
+        sim = a.simulate or a.ptz_simulate
+        if not sim and a.ptz == "auto" and not os.path.isdir(a.ptz_chip):
+            log.info("PTZ desactivado: no existe %s (falta dtoverlay=pwm-2chan)", a.ptz_chip)
+            return
+        try:
+            svc = P.PtzService(P.make_ptz(sim, a.ptz_chip), a.bind, a.ptz_port, a.ptz_port)
+            svc.start()
+        except OSError as e:
+            if a.ptz == "on":
+                raise
+            log.warning("PTZ desactivado: %s", e)
+            return
+        self.ptz = svc
+        if sim:
+            log.info("PTZ con servos SIMULADOS")
 
     # comandos JSON
     def handle_command(self, req):
@@ -645,7 +674,8 @@ class App:
                     "host": socket.gethostname(),
                     "ports": {"control": self.args.ctrl_port, "data": self.args.data_port},
                     "frame_header": {"size": FRAME_HDR.size, "version": FRAME_VERSION,
-                                     "format": str(FRAME_HDR.format)}}
+                                     "format": str(FRAME_HDR.format)},
+                    "ptz": {"version": P.VERSION, "port": self.args.ptz_port} if self.ptz else None}
         if cmd == "info":
             if cap.camera_info is None:
                 return {"ok": False, "error": "no hay camara detectada"}
@@ -671,8 +701,19 @@ class App:
             st["ok"] = True
             st["sdk"] = self.sdk.version
             st["version"] = VERSION
+            st["ptz"] = self.ptz.ptz.state() if self.ptz else None
             return st
-        raise ValueError("comando desconocido: %r (hello, info, get, set, status)" % cmd)
+        if cmd == "ptz":
+            # misma linea de comando que por el puerto PTZ; canal propio para el watchdog
+            if not self.ptz:
+                return {"ok": False, "error": "control PTZ desactivado"}
+            line = req.get("line")
+            if not isinstance(line, str) or not line.strip() or len(line) > P.LINE_MAX:
+                raise ValueError("ptz: falta 'line' (texto de hasta %d caracteres)" % P.LINE_MAX)
+            self.ptz.ptz.touch("json")
+            replies = self.ptz.ptz.handle(line.strip(), "json")
+            return {"ok": not replies[0].startswith("ERR"), "replies": replies}
+        raise ValueError("comando desconocido: %r (hello, info, get, set, status, ptz)" % cmd)
 
     # servidores
     def _data_server(self):
@@ -735,6 +776,7 @@ class App:
         self.capturer.start()
         log.info("escuchando: control %d/tcp, datos %d/tcp, busqueda %d/udp",
                  self.args.ctrl_port, self.args.data_port, self.args.ctrl_port)
+        self._start_ptz()
 
         def _stop(signum, _frame):
             log.info("senal %d: cerrando", signum)
@@ -743,6 +785,8 @@ class App:
         signal.signal(signal.SIGTERM, _stop)
         while not self.stop_event.is_set():
             self.stop_event.wait(0.5)
+        if self.ptz:
+            self.ptz.stop()
         ctrl.shutdown()
         ctrl.server_close()
         self.capturer.stop_event.set()
@@ -772,7 +816,13 @@ def main(argv=None):
     p.add_argument("--config", default=os.path.expanduser("~/.config/asicam/settings.json"),
                    help="archivo JSON donde se guardan los ajustes")
     p.add_argument("--rt", action="store_true", help="captura con prioridad de tiempo real (requiere root)")
-    p.add_argument("--simulate", action="store_true", help="camara simulada, para probar sin hardware")
+    p.add_argument("--simulate", action="store_true",
+                   help="camara simulada (y servos simulados), para probar sin hardware")
+    p.add_argument("--ptz", choices=("auto", "on", "off"), default="auto",
+                   help="control PTZ de los servos: auto = si hay PWM (por defecto)")
+    p.add_argument("--ptz-port", type=int, default=P.TCP_PORT, help="puerto PTZ TCP y UDP (5000)")
+    p.add_argument("--ptz-chip", default=P.PWM_CHIP, help="pwmchip de sysfs")
+    p.add_argument("--ptz-simulate", action="store_true", help="servos simulados con la camara real")
     p.add_argument("--debug", action="store_true")
     args = p.parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO,
