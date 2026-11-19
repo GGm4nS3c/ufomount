@@ -1,0 +1,206 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1300" height="1010" viewBox="0 0 1300 1010" font-family="Segoe UI, Arial, Helvetica, sans-serif">
+  <title>UFOMOUNT: conexión con Raspberry Pi 4</title>
+  <defs>
+    <style>
+      .box { fill:#F5F7FA; stroke:#37474F; stroke-width:2; }
+      .t { font-size:15px; font-weight:700; fill:#263238; }
+      .s { font-size:12px; fill:#455A64; }
+      .tiny { font-size:10px; fill:#455A64; }
+      .w24 { stroke:#B71C1C; stroke-width:4; fill:none; }
+      .w75 { stroke:#E53935; stroke-width:3.5; fill:none; }
+      .w5 { stroke:#8E24AA; stroke-width:3; fill:none; }
+      .wx { stroke:#F08A2E; stroke-width:2.6; fill:none; }
+      .wy { stroke:#1E88E5; stroke-width:2.6; fill:none; }
+      .wg { stroke:#212121; stroke-width:2.6; fill:none; }
+      .wd { stroke:#607D8B; stroke-width:3; fill:none; }
+      .gnd { stroke:#212121; stroke-width:2; fill:none; }
+      .pin { fill:#C9A227; }
+      .onpi { fill:#FFFFFF; font-size:11px; }
+    </style>
+  </defs>
+  <rect width="1300" height="1010" fill="#FFFFFF"/>
+
+  <text x="30" y="36" font-size="22" font-weight="700" fill="#263238">UFOMOUNT · conexión con Raspberry Pi 4</text>
+  <text x="30" y="58" class="s">Alimentación en secuencia por PoE pasivo · servos por el PWM de la Pi · cámara por USB</text>
+
+  <g transform="translate(0,50)">
+
+  <!-- ================= cadena de alimentacion ================= -->
+  <!-- fuente 24 V DC -->
+  <rect class="box" x="30" y="55" width="170" height="70" rx="8"/>
+  <text x="115" y="84" class="t" text-anchor="middle">Fuente 24 V DC</text>
+  <text x="115" y="104" class="s" text-anchor="middle">entrada de la cadena</text>
+  <path class="gnd" d="M115 125 V133 M105 133 H125 M109 137 H121 M113 141 H117"/>
+
+  <!-- red -->
+  <rect class="box" x="30" y="150" width="170" height="65" rx="8"/>
+  <text x="115" y="178" class="t" text-anchor="middle">Red / PC</text>
+  <text x="115" y="198" class="s" text-anchor="middle">Ethernet (datos)</text>
+
+  <!-- inyector -->
+  <rect class="box" x="250" y="55" width="170" height="160" rx="8"/>
+  <text x="335" y="118" class="t" text-anchor="middle">PoE pasivo</text>
+  <text x="335" y="138" class="s" text-anchor="middle">inyector</text>
+  <text x="335" y="156" class="s" text-anchor="middle">junta 24 V + red</text>
+  <path class="w24" d="M200 90 H250"/>
+  <path class="wd" d="M200 180 H250"/>
+
+  <!-- cable de red con PoE -->
+  <path d="M420 135 H600" stroke="#78909C" stroke-width="11" fill="none"/>
+  <path d="M420 135 H600" stroke="#B71C1C" stroke-width="2.5" fill="none"/>
+  <text x="510" y="117" text-anchor="middle" font-size="12" font-weight="700" fill="#37474F">cable de red</text>
+  <text x="510" y="161" text-anchor="middle" font-size="11" fill="#455A64">datos + 24 V</text>
+
+  <!-- splitter -->
+  <rect class="box" x="600" y="55" width="170" height="160" rx="8"/>
+  <text x="685" y="118" class="t" text-anchor="middle">PoE pasivo</text>
+  <text x="685" y="138" class="s" text-anchor="middle">splitter</text>
+  <text x="685" y="156" class="s" text-anchor="middle">(en la montura)</text>
+  <text x="606" y="186" class="tiny">LAN</text>
+
+  <!-- 24 V: splitter -> XL4016 -->
+  <path class="w24" d="M770 90 H830"/>
+  <text x="800" y="82" text-anchor="middle" font-size="11" fill="#B71C1C">24 V</text>
+
+  <!-- XL4016 -->
+  <rect class="box" x="830" y="50" width="170" height="80" rx="8"/>
+  <text x="915" y="78" class="t" text-anchor="middle">XL4016 (buck)</text>
+  <text x="915" y="98" class="s" text-anchor="middle">salida 7,5 V · 6 A</text>
+  <text x="915" y="115" class="s" text-anchor="middle">servos + MP1584</text>
+  <path class="gnd" d="M915 130 V138 M905 138 H925 M909 142 H921 M913 146 H917"/>
+
+  <!-- 7,5 V: XL4016 -> servos y MP1584 -->
+  <path class="w75" d="M1000 90 H1050 V470"/>
+  <path class="w75" d="M1050 225 H560 V250"/>
+  <path class="w75" d="M870 225 V250"/>
+  <circle cx="1050" cy="225" r="5" fill="#E53935"/>
+  <circle cx="870" cy="225" r="5" fill="#E53935"/>
+  <text x="885" y="217" font-size="11" fill="#C62828">V+ (rojo) de los servos</text>
+  <text x="1058" y="200" font-size="11" fill="#C62828">7,5 V</text>
+  <text x="1058" y="458" font-size="11" fill="#C62828">IN 7,5 V</text>
+
+  <!-- ================= servos ================= -->
+  <rect class="box" x="500" y="250" width="200" height="80" rx="8"/>
+  <text x="600" y="280" class="t" text-anchor="middle">Servo X · pan 270°</text>
+  <text x="600" y="300" class="s" text-anchor="middle">GX3350 (X50 Pro)</text>
+  <text x="600" y="317" class="tiny" text-anchor="middle">V+ arriba · señal y GND abajo</text>
+
+  <rect class="box" x="740" y="250" width="200" height="80" rx="8"/>
+  <text x="840" y="280" class="t" text-anchor="middle">Servo Y · tilt 180°</text>
+  <text x="840" y="300" class="s" text-anchor="middle">GX3350 (X50 Pro)</text>
+  <text x="840" y="317" class="tiny" text-anchor="middle">V+ arriba · señal y GND abajo</text>
+
+  <!-- ================= Raspberry Pi 4 ================= -->
+  <rect x="470" y="420" width="460" height="270" rx="14" fill="#1E6B3A" stroke="#0F3D22" stroke-width="2"/>
+  <circle cx="488" cy="438" r="5" fill="#0F3D22"/>
+  <circle cx="912" cy="438" r="5" fill="#0F3D22"/>
+  <circle cx="488" cy="672" r="5" fill="#0F3D22"/>
+  <circle cx="912" cy="672" r="5" fill="#0F3D22"/>
+  <rect x="520" y="438" width="324" height="40" rx="3" fill="#111111"/>
+  <text x="682" y="512" text-anchor="middle" font-size="11" fill="#C8E6C9">conector de 40 pines · □ = pin 1 (punta opuesta a los USB)</text>
+  <text x="700" y="582" text-anchor="middle" font-size="26" font-weight="700" fill="#FFFFFF">Raspberry Pi 4</text>
+  <text x="700" y="606" text-anchor="middle" font-size="13" fill="#E8F5E9">asicam_server.py: cámara + servos (PTZ)</text>
+  <text x="700" y="626" text-anchor="middle" font-size="12" fill="#C8E6C9">PWM por hardware: GPIO18 = X · GPIO13 = Y</text>
+
+  <!-- puertos -->
+  <rect x="462" y="586" width="26" height="28" rx="3" fill="#ECEFF1" stroke="#455A64" stroke-width="1.5"/>
+  <text x="496" y="604" class="onpi">Ethernet</text>
+  <rect x="920" y="518" width="22" height="24" rx="3" fill="#CFD8DC" stroke="#455A64" stroke-width="1.5"/>
+  <text x="912" y="534" text-anchor="end" class="onpi">USB-C</text>
+  <rect x="918" y="622" width="24" height="26" rx="3" fill="#CFD8DC" stroke="#455A64" stroke-width="1.5"/>
+  <text x="910" y="639" text-anchor="end" class="onpi">USB</text>
+
+  <!-- red: splitter -> Ethernet de la Pi -->
+  <path class="wd" d="M600 190 H440 V600 H462"/>
+
+  <!-- MP1584 -->
+  <rect class="box" x="990" y="470" width="180" height="80" rx="8"/>
+  <text x="1080" y="498" class="t" text-anchor="middle">MP1584 (buck)</text>
+  <text x="1080" y="518" class="s" text-anchor="middle">salida 5,15 V</text>
+  <text x="1080" y="535" class="tiny" text-anchor="middle">ajustar 5,1–5,2 V</text>
+  <path class="gnd" d="M1130 550 V558 M1120 558 H1140 M1124 562 H1136 M1128 566 H1132"/>
+  <!-- 5,15 V -> USB-C de la Pi -->
+  <path class="w5" d="M990 530 H942"/>
+  <text x="966" y="522" text-anchor="middle" font-size="11" fill="#8E24AA">5,15 V</text>
+
+  <!-- camara -->
+  <path class="wd" d="M942 635 H990"/>
+  <rect class="box" x="990" y="600" width="180" height="70" rx="8"/>
+  <text x="1080" y="628" class="t" text-anchor="middle">Cámara ZWO</text>
+  <text x="1080" y="648" class="s" text-anchor="middle">ASI220MM Mini · USB 2.0</text>
+
+  <!-- ================= señales de los servos ================= -->
+  <!-- servo X: señal -> pin 12, GND -> pin 14 -->
+  <path class="wx" d="M610 330 V446"/>
+  <path class="wg" d="M626 330 V446"/>
+  <rect x="603" y="352" width="14" height="28" fill="#FFFFFF" stroke="#F08A2E" stroke-width="2" stroke-dasharray="4 3"/>
+  <text x="597" y="364" text-anchor="end" class="tiny">470 Ω–1 kΩ</text>
+  <text x="597" y="377" text-anchor="end" class="tiny">(opcional)</text>
+  <text x="604" y="408" text-anchor="end" font-size="12" fill="#C25E0A">pin 12 · GPIO18</text>
+  <text x="632" y="408" font-size="12" fill="#212121">pin 14 · GND</text>
+
+  <!-- servo Y: señal -> pin 33 (por debajo del conector), GND -> pin 34 -->
+  <path class="wy" d="M900 330 V492 H786 V470"/>
+  <path class="wg" d="M786 330 V446"/>
+  <rect x="893" y="352" width="14" height="28" fill="#FFFFFF" stroke="#1E88E5" stroke-width="2" stroke-dasharray="4 3"/>
+  <text x="913" y="364" class="tiny">470 Ω–1 kΩ</text>
+  <text x="913" y="377" class="tiny">(opcional)</text>
+  <text x="906" y="408" font-size="12" fill="#1565C0">pin 33 · GPIO13</text>
+  <text x="780" y="384" text-anchor="end" font-size="12" fill="#212121">pin 34 · GND</text>
+
+  <!-- pines: fila de arriba = pares (borde de la placa), abajo = impares -->
+  <g>
+    <circle class="pin" cx="530" cy="450" r="4.5"/><circle class="pin" cx="546" cy="450" r="4.5"/>
+    <circle class="pin" cx="562" cy="450" r="4.5"/><circle class="pin" cx="578" cy="450" r="4.5"/>
+    <circle class="pin" cx="594" cy="450" r="4.5"/><circle class="pin" cx="610" cy="450" r="4.5"/>
+    <circle class="pin" cx="626" cy="450" r="4.5"/><circle class="pin" cx="642" cy="450" r="4.5"/>
+    <circle class="pin" cx="658" cy="450" r="4.5"/><circle class="pin" cx="674" cy="450" r="4.5"/>
+    <circle class="pin" cx="690" cy="450" r="4.5"/><circle class="pin" cx="706" cy="450" r="4.5"/>
+    <circle class="pin" cx="722" cy="450" r="4.5"/><circle class="pin" cx="738" cy="450" r="4.5"/>
+    <circle class="pin" cx="754" cy="450" r="4.5"/><circle class="pin" cx="770" cy="450" r="4.5"/>
+    <circle class="pin" cx="786" cy="450" r="4.5"/><circle class="pin" cx="802" cy="450" r="4.5"/>
+    <circle class="pin" cx="818" cy="450" r="4.5"/><circle class="pin" cx="834" cy="450" r="4.5"/>
+    <rect class="pin" x="525.5" y="461.5" width="9" height="9"/><circle class="pin" cx="546" cy="466" r="4.5"/>
+    <circle class="pin" cx="562" cy="466" r="4.5"/><circle class="pin" cx="578" cy="466" r="4.5"/>
+    <circle class="pin" cx="594" cy="466" r="4.5"/><circle class="pin" cx="610" cy="466" r="4.5"/>
+    <circle class="pin" cx="626" cy="466" r="4.5"/><circle class="pin" cx="642" cy="466" r="4.5"/>
+    <circle class="pin" cx="658" cy="466" r="4.5"/><circle class="pin" cx="674" cy="466" r="4.5"/>
+    <circle class="pin" cx="690" cy="466" r="4.5"/><circle class="pin" cx="706" cy="466" r="4.5"/>
+    <circle class="pin" cx="722" cy="466" r="4.5"/><circle class="pin" cx="738" cy="466" r="4.5"/>
+    <circle class="pin" cx="754" cy="466" r="4.5"/><circle class="pin" cx="770" cy="466" r="4.5"/>
+    <circle class="pin" cx="786" cy="466" r="4.5"/><circle class="pin" cx="802" cy="466" r="4.5"/>
+    <circle class="pin" cx="818" cy="466" r="4.5"/><circle class="pin" cx="834" cy="466" r="4.5"/>
+  </g>
+  <circle cx="610" cy="450" r="5.5" fill="#F08A2E" stroke="#FFFFFF" stroke-width="1.5"/>
+  <circle cx="626" cy="450" r="5.5" fill="#424242" stroke="#FFFFFF" stroke-width="1.5"/>
+  <circle cx="786" cy="450" r="5.5" fill="#424242" stroke="#FFFFFF" stroke-width="1.5"/>
+  <circle cx="786" cy="466" r="5.5" fill="#1E88E5" stroke="#FFFFFF" stroke-width="1.5"/>
+
+  <!-- ================= leyenda ================= -->
+  <g font-size="12" fill="#263238">
+    <path class="w24" d="M30 730 H60"/><text x="66" y="734">24 V</text>
+    <path d="M115 730 H145" stroke="#78909C" stroke-width="9"/><path d="M115 730 H145" stroke="#B71C1C" stroke-width="2.5"/><text x="151" y="734">cable PoE</text>
+    <path class="w75" d="M230 730 H260"/><text x="266" y="734">7,5 V</text>
+    <path class="w5" d="M320 730 H350"/><text x="356" y="734">5,15 V</text>
+    <path class="wx" d="M420 730 H450"/><text x="456" y="734">señal X</text>
+    <path class="wy" d="M520 730 H550"/><text x="556" y="734">señal Y</text>
+    <path class="wg" d="M620 730 H650"/><text x="656" y="734">GND</text>
+    <path class="wd" d="M705 730 H735"/><text x="741" y="734">red / USB</text>
+    <path class="gnd" d="M830 723 V729 M820 729 H840 M824 733 H836 M828 737 H832"/><text x="848" y="734">GND común: todos los negativos unidos</text>
+  </g>
+
+  <!-- ================= notas ================= -->
+  <rect x="30" y="756" width="1240" height="196" rx="8" fill="#FAFAFA" stroke="#CFD8DC"/>
+  <text x="46" y="780" font-size="13" font-weight="700" fill="#263238">Notas</text>
+  <g font-size="12" fill="#263238">
+    <text x="46" y="804">1. Secuencia: fuente 24 V DC → inyector PoE pasivo (suma la red) → cable → splitter en la montura → XL4016 7,5 V 6 A → servos X e Y; del XL4016 sale también el MP1584 (5,15 V) → Pi.</text>
+    <text x="46" y="826">2. PWM por hardware en /boot/config.txt (ya activado): <tspan font-family="Consolas, monospace">dtoverlay=pwm-2chan,pin=18,func=2,pin2=13,func2=4</tspan></text>
+    <text x="46" y="848">3. El rojo (V+) de los servos va solo a los 7,5 V: nunca a un pin de la Pi. Conectar y desconectar con la alimentación apagada.</text>
+    <text x="46" y="870">4. MP1584 en 5,1–5,2 V con el potenciómetro fijado. La Pi suma ~1,5–2 A a los 7,5 V: si marca subtensión al mover los servos (<tspan font-family="Consolas, monospace">vcgencmd get_throttled</tspan> distinto de 0x0), tomar su entrada de los 24 V.</text>
+    <text x="46" y="892">5. A la Pi por USB-C (conserva su protección) o por los pines 2/4 (+5 V) y un GND (sin protección). Resistencias de 470 Ω–1 kΩ en las señales: opcionales, protegen el GPIO.</text>
+    <text x="46" y="914">6. Red: un PoE pasivo de 2 pares deja la red en 100 Mbps (unos 5 fps a 1080p). Para los 14 fps: inyector y splitter PoE pasivo gigabit, o un cable de red aparte para la Pi.</text>
+    <text x="46" y="936">7. Los GX3350 aceptan los 3,3 V de las señales de la Pi (probado). Los pines usados están resaltados en el conector.</text>
+  </g>
+
+  </g>
+</svg>

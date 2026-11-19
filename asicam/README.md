@@ -77,7 +77,17 @@ firmware v4.1 del Arduino (`firmware/ptztest/ptztest.ino`) pasado a Python, con 
 protocolo, por eso la GUI PTZ (`scripts/ptz_gui.py`, `UfomountPTZ.exe`) lo encuentra con
 **Buscar** y lo maneja sin cambios.
 
-Conexión (el rojo de los servos sigue en su fuente de 7,5 V, nunca en la Pi):
+![Esquema de conexión con la Raspberry Pi 4](../docs/img/esquema-raspberry.svg)
+
+Alimentación, en secuencia: fuente de 24 V DC → inyector PoE pasivo (le suma la red) → cable
+de red → splitter PoE pasivo en la montura → XL4016 a 7,5 V (6 A) → servos X e Y. De la salida
+del XL4016 sale también un MP1584 ajustado a 5,1–5,2 V (5,15 V) que alimenta la Pi, por USB-C
+o por los pines 2/4. La Pi suma unos 1,5–2 A a los 7,5 V: si marca subtensión al mover los
+servos (`vcgencmd get_throttled` distinto de `0x0`), conviene tomar la entrada del MP1584 de
+los 24 V. Con un PoE pasivo de 2 pares la red queda en 100 Mbps (unos 5 fps a 1080p); para los
+14 fps hace falta PoE pasivo gigabit o un cable de red aparte para la Pi.
+
+Señales (el rojo de los servos sigue en los 7,5 V, nunca en la Pi):
 
 | Servo | Cable | Pin de la Pi |
 |---|---|---|
