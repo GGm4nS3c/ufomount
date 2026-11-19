@@ -138,7 +138,7 @@
   <rect x="603" y="352" width="14" height="28" fill="#FFFFFF" stroke="#F08A2E" stroke-width="2" stroke-dasharray="4 3"/>
   <text x="597" y="364" text-anchor="end" class="tiny">470 Ω–1 kΩ</text>
   <text x="597" y="377" text-anchor="end" class="tiny">(opcional)</text>
-  <text x="604" y="408" text-anchor="end" font-size="12" fill="#C25E0A">pin 12 · GPIO18</text>
+  <text x="604" y="346" text-anchor="end" font-size="12" fill="#C25E0A">pin 12 · GPIO18</text>
   <text x="632" y="408" font-size="12" fill="#212121">pin 14 · GND</text>
 
   <!-- servo Y: señal -> pin 33 (por debajo del conector), GND -> pin 34 -->
@@ -150,6 +150,16 @@
   <text x="906" y="408" font-size="12" fill="#1565C0">pin 33 · GPIO13</text>
   <text x="780" y="384" text-anchor="end" font-size="12" fill="#212121">pin 34 · GND</text>
 
+  <!-- ventilador de la caja: pin 4 (+5 V) y pin 6 (GND) -->
+  <rect class="box" x="368" y="372" width="94" height="60" rx="8"/>
+  <circle cx="383" cy="388" r="8" fill="none" stroke="#455A64" stroke-width="1.5"/>
+  <path d="M383 388 L383 381 M383 388 L389 392 M383 388 L377 392" stroke="#455A64" stroke-width="1.5"/>
+  <text x="397" y="392" font-size="12" font-weight="700" fill="#263238">Ventilador</text>
+  <text x="415" y="408" text-anchor="middle" class="tiny">pin 6: GND</text>
+  <text x="415" y="423" text-anchor="middle" class="tiny">pin 4: +5 V</text>
+  <path class="wg" d="M462 400 H562 V426"/>
+  <path class="w5" d="M462 415 H546 V426"/>
+
   <!-- pines numerados: fila de arriba = pares (borde de la placa), abajo = impares -->
   <g>
     <rect class="pin" x="525.5" y="459.5" width="9" height="9"/>
@@ -158,12 +168,12 @@
     <text x="530" y="437" text-anchor="middle" font-size="8" fill="#B0BEC5">2</text>
     <circle class="pin" cx="546" cy="464" r="4.5"/>
     <text x="546" y="485" text-anchor="middle" font-size="8" fill="#B0BEC5">3</text>
-    <circle class="pin" cx="546" cy="448" r="4.5"/>
-    <text x="546" y="437" text-anchor="middle" font-size="8" fill="#B0BEC5">4</text>
+    <circle cx="546" cy="448" r="5.5" fill="#CE93D8" stroke="#FFFFFF" stroke-width="1.5"/>
+    <text x="546" y="437" text-anchor="middle" font-size="8.5" font-weight="700" fill="#FFFFFF">4</text>
     <circle class="pin" cx="562" cy="464" r="4.5"/>
     <text x="562" y="485" text-anchor="middle" font-size="8" fill="#B0BEC5">5</text>
-    <circle class="pin" cx="562" cy="448" r="4.5"/>
-    <text x="562" y="437" text-anchor="middle" font-size="8" fill="#B0BEC5">6</text>
+    <circle cx="562" cy="448" r="5.5" fill="#424242" stroke="#FFFFFF" stroke-width="1.5"/>
+    <text x="562" y="437" text-anchor="middle" font-size="8.5" font-weight="700" fill="#FFFFFF">6</text>
     <circle class="pin" cx="578" cy="464" r="4.5"/>
     <text x="578" y="485" text-anchor="middle" font-size="8" fill="#B0BEC5">7</text>
     <circle class="pin" cx="578" cy="448" r="4.5"/>
@@ -256,7 +266,7 @@
     <text x="46" y="826">2. PWM por hardware en /boot/config.txt (ya activado): <tspan font-family="Consolas, monospace">dtoverlay=pwm-2chan,pin=18,func=2,pin2=13,func2=4</tspan></text>
     <text x="46" y="848">3. El rojo (V+) de los servos va solo a los 7,5 V: nunca a un pin de la Pi. Conectar y desconectar con la alimentación apagada.</text>
     <text x="46" y="870">4. MP1584 en 5,1–5,2 V con el potenciómetro fijado. La Pi suma ~1,5–2 A a los 7,5 V: si marca subtensión al mover los servos (<tspan font-family="Consolas, monospace">vcgencmd get_throttled</tspan> distinto de 0x0), tomar su entrada de los 24 V.</text>
-    <text x="46" y="892">5. A la Pi por USB-C (conserva su protección) o por los pines 2/4 (+5 V) y un GND (sin protección). Resistencias de 470 Ω–1 kΩ en las señales: opcionales, protegen el GPIO.</text>
+    <text x="46" y="892">5. A la Pi por USB-C (conserva su protección) o por el pin 2 (+5 V) y un GND (sin protección); el 4 y el 6 los usa el ventilador. Resistencias de 470 Ω–1 kΩ en las señales: opcionales, protegen el GPIO.</text>
     <text x="46" y="914">6. Red: un PoE pasivo de 2 pares deja la red en 100 Mbps (unos 5 fps a 1080p). Para los 14 fps: inyector y splitter PoE pasivo gigabit, o un cable de red aparte para la Pi.</text>
     <text x="46" y="936">7. Orientación: el pin 1 está en la punta opuesta a la red y los USB; los pines 39 y 40 quedan junto al Ethernet. Los GX3350 aceptan los 3,3 V de la Pi.</text>
   </g>
