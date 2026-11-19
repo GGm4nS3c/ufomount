@@ -96,8 +96,8 @@
   <circle cx="912" cy="438" r="5" fill="#0F3D22"/>
   <circle cx="488" cy="672" r="5" fill="#0F3D22"/>
   <circle cx="912" cy="672" r="5" fill="#0F3D22"/>
-  <rect x="520" y="438" width="324" height="40" rx="3" fill="#111111"/>
-  <text x="682" y="512" text-anchor="middle" font-size="11" fill="#C8E6C9">conector de 40 pines · □ = pin 1 (punta opuesta a los USB)</text>
+  <rect x="520" y="426" width="324" height="68" rx="3" fill="#111111"/>
+  <text x="682" y="526" text-anchor="middle" font-size="11" fill="#C8E6C9">40 pines · arriba los pares (borde de la placa), abajo los impares · □ = pin 1</text>
   <text x="700" y="582" text-anchor="middle" font-size="26" font-weight="700" fill="#FFFFFF">Raspberry Pi 4</text>
   <text x="700" y="606" text-anchor="middle" font-size="13" fill="#E8F5E9">asicam_server.py: cámara + servos (PTZ)</text>
   <text x="700" y="626" text-anchor="middle" font-size="12" fill="#C8E6C9">PWM por hardware: GPIO18 = X · GPIO13 = Y</text>
@@ -131,8 +131,8 @@
 
   <!-- ================= señales de los servos ================= -->
   <!-- servo X: señal -> pin 12, GND -> pin 14 -->
-  <path class="wx" d="M610 330 V446"/>
-  <path class="wg" d="M626 330 V446"/>
+  <path class="wx" d="M610 330 V426"/>
+  <path class="wg" d="M626 330 V426"/>
   <rect x="603" y="352" width="14" height="28" fill="#FFFFFF" stroke="#F08A2E" stroke-width="2" stroke-dasharray="4 3"/>
   <text x="597" y="364" text-anchor="end" class="tiny">470 Ω–1 kΩ</text>
   <text x="597" y="377" text-anchor="end" class="tiny">(opcional)</text>
@@ -140,41 +140,97 @@
   <text x="632" y="408" font-size="12" fill="#212121">pin 14 · GND</text>
 
   <!-- servo Y: señal -> pin 33 (por debajo del conector), GND -> pin 34 -->
-  <path class="wy" d="M900 330 V492 H786 V470"/>
-  <path class="wg" d="M786 330 V446"/>
+  <path class="wy" d="M900 330 V506 H786 V494"/>
+  <path class="wg" d="M786 330 V426"/>
   <rect x="893" y="352" width="14" height="28" fill="#FFFFFF" stroke="#1E88E5" stroke-width="2" stroke-dasharray="4 3"/>
   <text x="913" y="364" class="tiny">470 Ω–1 kΩ</text>
   <text x="913" y="377" class="tiny">(opcional)</text>
   <text x="906" y="408" font-size="12" fill="#1565C0">pin 33 · GPIO13</text>
   <text x="780" y="384" text-anchor="end" font-size="12" fill="#212121">pin 34 · GND</text>
 
-  <!-- pines: fila de arriba = pares (borde de la placa), abajo = impares -->
+  <!-- pines numerados: fila de arriba = pares (borde de la placa), abajo = impares -->
   <g>
-    <circle class="pin" cx="530" cy="450" r="4.5"/><circle class="pin" cx="546" cy="450" r="4.5"/>
-    <circle class="pin" cx="562" cy="450" r="4.5"/><circle class="pin" cx="578" cy="450" r="4.5"/>
-    <circle class="pin" cx="594" cy="450" r="4.5"/><circle class="pin" cx="610" cy="450" r="4.5"/>
-    <circle class="pin" cx="626" cy="450" r="4.5"/><circle class="pin" cx="642" cy="450" r="4.5"/>
-    <circle class="pin" cx="658" cy="450" r="4.5"/><circle class="pin" cx="674" cy="450" r="4.5"/>
-    <circle class="pin" cx="690" cy="450" r="4.5"/><circle class="pin" cx="706" cy="450" r="4.5"/>
-    <circle class="pin" cx="722" cy="450" r="4.5"/><circle class="pin" cx="738" cy="450" r="4.5"/>
-    <circle class="pin" cx="754" cy="450" r="4.5"/><circle class="pin" cx="770" cy="450" r="4.5"/>
-    <circle class="pin" cx="786" cy="450" r="4.5"/><circle class="pin" cx="802" cy="450" r="4.5"/>
-    <circle class="pin" cx="818" cy="450" r="4.5"/><circle class="pin" cx="834" cy="450" r="4.5"/>
-    <rect class="pin" x="525.5" y="461.5" width="9" height="9"/><circle class="pin" cx="546" cy="466" r="4.5"/>
-    <circle class="pin" cx="562" cy="466" r="4.5"/><circle class="pin" cx="578" cy="466" r="4.5"/>
-    <circle class="pin" cx="594" cy="466" r="4.5"/><circle class="pin" cx="610" cy="466" r="4.5"/>
-    <circle class="pin" cx="626" cy="466" r="4.5"/><circle class="pin" cx="642" cy="466" r="4.5"/>
-    <circle class="pin" cx="658" cy="466" r="4.5"/><circle class="pin" cx="674" cy="466" r="4.5"/>
-    <circle class="pin" cx="690" cy="466" r="4.5"/><circle class="pin" cx="706" cy="466" r="4.5"/>
-    <circle class="pin" cx="722" cy="466" r="4.5"/><circle class="pin" cx="738" cy="466" r="4.5"/>
-    <circle class="pin" cx="754" cy="466" r="4.5"/><circle class="pin" cx="770" cy="466" r="4.5"/>
-    <circle class="pin" cx="786" cy="466" r="4.5"/><circle class="pin" cx="802" cy="466" r="4.5"/>
-    <circle class="pin" cx="818" cy="466" r="4.5"/><circle class="pin" cx="834" cy="466" r="4.5"/>
+    <rect class="pin" x="525.5" y="459.5" width="9" height="9"/>
+    <text x="530" y="485" text-anchor="middle" font-size="8" fill="#B0BEC5">1</text>
+    <circle class="pin" cx="530" cy="448" r="4.5"/>
+    <text x="530" y="437" text-anchor="middle" font-size="8" fill="#B0BEC5">2</text>
+    <circle class="pin" cx="546" cy="464" r="4.5"/>
+    <text x="546" y="485" text-anchor="middle" font-size="8" fill="#B0BEC5">3</text>
+    <circle class="pin" cx="546" cy="448" r="4.5"/>
+    <text x="546" y="437" text-anchor="middle" font-size="8" fill="#B0BEC5">4</text>
+    <circle class="pin" cx="562" cy="464" r="4.5"/>
+    <text x="562" y="485" text-anchor="middle" font-size="8" fill="#B0BEC5">5</text>
+    <circle class="pin" cx="562" cy="448" r="4.5"/>
+    <text x="562" y="437" text-anchor="middle" font-size="8" fill="#B0BEC5">6</text>
+    <circle class="pin" cx="578" cy="464" r="4.5"/>
+    <text x="578" y="485" text-anchor="middle" font-size="8" fill="#B0BEC5">7</text>
+    <circle class="pin" cx="578" cy="448" r="4.5"/>
+    <text x="578" y="437" text-anchor="middle" font-size="8" fill="#B0BEC5">8</text>
+    <circle class="pin" cx="594" cy="464" r="4.5"/>
+    <text x="594" y="485" text-anchor="middle" font-size="8" fill="#B0BEC5">9</text>
+    <circle class="pin" cx="594" cy="448" r="4.5"/>
+    <text x="594" y="437" text-anchor="middle" font-size="8" fill="#B0BEC5">10</text>
+    <circle class="pin" cx="610" cy="464" r="4.5"/>
+    <text x="610" y="485" text-anchor="middle" font-size="8" fill="#B0BEC5">11</text>
+    <circle cx="610" cy="448" r="5.5" fill="#F08A2E" stroke="#FFFFFF" stroke-width="1.5"/>
+    <text x="610" y="437" text-anchor="middle" font-size="8.5" font-weight="700" fill="#FFFFFF">12</text>
+    <circle class="pin" cx="626" cy="464" r="4.5"/>
+    <text x="626" y="485" text-anchor="middle" font-size="8" fill="#B0BEC5">13</text>
+    <circle cx="626" cy="448" r="5.5" fill="#424242" stroke="#FFFFFF" stroke-width="1.5"/>
+    <text x="626" y="437" text-anchor="middle" font-size="8.5" font-weight="700" fill="#FFFFFF">14</text>
+    <circle class="pin" cx="642" cy="464" r="4.5"/>
+    <text x="642" y="485" text-anchor="middle" font-size="8" fill="#B0BEC5">15</text>
+    <circle class="pin" cx="642" cy="448" r="4.5"/>
+    <text x="642" y="437" text-anchor="middle" font-size="8" fill="#B0BEC5">16</text>
+    <circle class="pin" cx="658" cy="464" r="4.5"/>
+    <text x="658" y="485" text-anchor="middle" font-size="8" fill="#B0BEC5">17</text>
+    <circle class="pin" cx="658" cy="448" r="4.5"/>
+    <text x="658" y="437" text-anchor="middle" font-size="8" fill="#B0BEC5">18</text>
+    <circle class="pin" cx="674" cy="464" r="4.5"/>
+    <text x="674" y="485" text-anchor="middle" font-size="8" fill="#B0BEC5">19</text>
+    <circle class="pin" cx="674" cy="448" r="4.5"/>
+    <text x="674" y="437" text-anchor="middle" font-size="8" fill="#B0BEC5">20</text>
+    <circle class="pin" cx="690" cy="464" r="4.5"/>
+    <text x="690" y="485" text-anchor="middle" font-size="8" fill="#B0BEC5">21</text>
+    <circle class="pin" cx="690" cy="448" r="4.5"/>
+    <text x="690" y="437" text-anchor="middle" font-size="8" fill="#B0BEC5">22</text>
+    <circle class="pin" cx="706" cy="464" r="4.5"/>
+    <text x="706" y="485" text-anchor="middle" font-size="8" fill="#B0BEC5">23</text>
+    <circle class="pin" cx="706" cy="448" r="4.5"/>
+    <text x="706" y="437" text-anchor="middle" font-size="8" fill="#B0BEC5">24</text>
+    <circle class="pin" cx="722" cy="464" r="4.5"/>
+    <text x="722" y="485" text-anchor="middle" font-size="8" fill="#B0BEC5">25</text>
+    <circle class="pin" cx="722" cy="448" r="4.5"/>
+    <text x="722" y="437" text-anchor="middle" font-size="8" fill="#B0BEC5">26</text>
+    <circle class="pin" cx="738" cy="464" r="4.5"/>
+    <text x="738" y="485" text-anchor="middle" font-size="8" fill="#B0BEC5">27</text>
+    <circle class="pin" cx="738" cy="448" r="4.5"/>
+    <text x="738" y="437" text-anchor="middle" font-size="8" fill="#B0BEC5">28</text>
+    <circle class="pin" cx="754" cy="464" r="4.5"/>
+    <text x="754" y="485" text-anchor="middle" font-size="8" fill="#B0BEC5">29</text>
+    <circle class="pin" cx="754" cy="448" r="4.5"/>
+    <text x="754" y="437" text-anchor="middle" font-size="8" fill="#B0BEC5">30</text>
+    <circle class="pin" cx="770" cy="464" r="4.5"/>
+    <text x="770" y="485" text-anchor="middle" font-size="8" fill="#B0BEC5">31</text>
+    <circle class="pin" cx="770" cy="448" r="4.5"/>
+    <text x="770" y="437" text-anchor="middle" font-size="8" fill="#B0BEC5">32</text>
+    <circle cx="786" cy="464" r="5.5" fill="#1E88E5" stroke="#FFFFFF" stroke-width="1.5"/>
+    <text x="786" y="485" text-anchor="middle" font-size="8.5" font-weight="700" fill="#FFFFFF">33</text>
+    <circle cx="786" cy="448" r="5.5" fill="#424242" stroke="#FFFFFF" stroke-width="1.5"/>
+    <text x="786" y="437" text-anchor="middle" font-size="8.5" font-weight="700" fill="#FFFFFF">34</text>
+    <circle class="pin" cx="802" cy="464" r="4.5"/>
+    <text x="802" y="485" text-anchor="middle" font-size="8" fill="#B0BEC5">35</text>
+    <circle class="pin" cx="802" cy="448" r="4.5"/>
+    <text x="802" y="437" text-anchor="middle" font-size="8" fill="#B0BEC5">36</text>
+    <circle class="pin" cx="818" cy="464" r="4.5"/>
+    <text x="818" y="485" text-anchor="middle" font-size="8" fill="#B0BEC5">37</text>
+    <circle class="pin" cx="818" cy="448" r="4.5"/>
+    <text x="818" y="437" text-anchor="middle" font-size="8" fill="#B0BEC5">38</text>
+    <circle class="pin" cx="834" cy="464" r="4.5"/>
+    <text x="834" y="485" text-anchor="middle" font-size="8" fill="#B0BEC5">39</text>
+    <circle class="pin" cx="834" cy="448" r="4.5"/>
+    <text x="834" y="437" text-anchor="middle" font-size="8" fill="#B0BEC5">40</text>
   </g>
-  <circle cx="610" cy="450" r="5.5" fill="#F08A2E" stroke="#FFFFFF" stroke-width="1.5"/>
-  <circle cx="626" cy="450" r="5.5" fill="#424242" stroke="#FFFFFF" stroke-width="1.5"/>
-  <circle cx="786" cy="450" r="5.5" fill="#424242" stroke="#FFFFFF" stroke-width="1.5"/>
-  <circle cx="786" cy="466" r="5.5" fill="#1E88E5" stroke="#FFFFFF" stroke-width="1.5"/>
 
   <!-- ================= leyenda ================= -->
   <g font-size="12" fill="#263238">
