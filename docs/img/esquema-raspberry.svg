@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1300" height="1010" viewBox="0 0 1300 1010" font-family="Segoe UI, Arial, Helvetica, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" width="1300" height="1040" viewBox="0 0 1300 1040" font-family="Segoe UI, Arial, Helvetica, sans-serif">
   <title>UFOMOUNT: conexión con Raspberry Pi 4</title>
   <defs>
     <style>
@@ -18,7 +18,7 @@
       .onpi { fill:#FFFFFF; font-size:11px; }
     </style>
   </defs>
-  <rect width="1300" height="1010" fill="#FFFFFF"/>
+  <rect width="1300" height="1040" fill="#FFFFFF"/>
 
   <text x="30" y="36" font-size="22" font-weight="700" fill="#263238">UFOMOUNT · conexión con Raspberry Pi 4</text>
   <text x="30" y="58" class="s">Alimentación en secuencia por PoE pasivo · servos por el PWM de la Pi · cámara por USB</text>
@@ -56,7 +56,7 @@
   <text x="685" y="118" class="t" text-anchor="middle">PoE pasivo</text>
   <text x="685" y="138" class="s" text-anchor="middle">splitter</text>
   <text x="685" y="156" class="s" text-anchor="middle">(en la montura)</text>
-  <text x="606" y="186" class="tiny">LAN</text>
+  <text x="764" y="186" class="tiny" text-anchor="end">LAN</text>
 
   <!-- 24 V: splitter -> XL4016 -->
   <path class="w24" d="M770 90 H830"/>
@@ -70,14 +70,16 @@
   <path class="gnd" d="M915 130 V138 M905 138 H925 M909 142 H921 M913 146 H917"/>
 
   <!-- 7,5 V: XL4016 -> servos y MP1584 -->
-  <path class="w75" d="M1000 90 H1050 V470"/>
-  <path class="w75" d="M1050 225 H560 V250"/>
+  <path class="w75" d="M1000 90 H1050 V225"/>
+  <path class="w75" d="M1050 225 H355 V560"/>
+  <path class="w75" d="M560 225 V250"/>
+  <circle cx="560" cy="225" r="5" fill="#E53935"/>
   <path class="w75" d="M870 225 V250"/>
   <circle cx="1050" cy="225" r="5" fill="#E53935"/>
   <circle cx="870" cy="225" r="5" fill="#E53935"/>
   <text x="885" y="217" font-size="11" fill="#C62828">V+ (rojo) de los servos</text>
   <text x="1058" y="200" font-size="11" fill="#C62828">7,5 V</text>
-  <text x="1058" y="458" font-size="11" fill="#C62828">IN 7,5 V</text>
+  <text x="361" y="552" font-size="11" fill="#C62828">IN 7,5 V</text>
 
   <!-- ================= servos ================= -->
   <rect class="box" x="500" y="250" width="200" height="80" rx="8"/>
@@ -97,37 +99,37 @@
   <circle cx="488" cy="672" r="5" fill="#0F3D22"/>
   <circle cx="912" cy="672" r="5" fill="#0F3D22"/>
   <rect x="520" y="426" width="324" height="68" rx="3" fill="#111111"/>
-  <text x="682" y="526" text-anchor="middle" font-size="11" fill="#C8E6C9">40 pines · arriba los pares (borde de la placa), abajo los impares · □ = pin 1</text>
+  <text x="682" y="526" text-anchor="middle" font-size="11" fill="#C8E6C9">pares arriba · impares abajo · □ = pin 1, lejos de la red y los USB</text>
   <text x="700" y="582" text-anchor="middle" font-size="26" font-weight="700" fill="#FFFFFF">Raspberry Pi 4</text>
   <text x="700" y="606" text-anchor="middle" font-size="13" fill="#E8F5E9">asicam_server.py: cámara + servos (PTZ)</text>
   <text x="700" y="626" text-anchor="middle" font-size="12" fill="#C8E6C9">PWM por hardware: GPIO18 = X · GPIO13 = Y</text>
 
-  <!-- puertos -->
-  <rect x="462" y="586" width="26" height="28" rx="3" fill="#ECEFF1" stroke="#455A64" stroke-width="1.5"/>
-  <text x="496" y="604" class="onpi">Ethernet</text>
-  <rect x="920" y="518" width="22" height="24" rx="3" fill="#CFD8DC" stroke="#455A64" stroke-width="1.5"/>
-  <text x="912" y="534" text-anchor="end" class="onpi">USB-C</text>
-  <rect x="918" y="622" width="24" height="26" rx="3" fill="#CFD8DC" stroke="#455A64" stroke-width="1.5"/>
-  <text x="910" y="639" text-anchor="end" class="onpi">USB</text>
+  <!-- puertos en su lugar real: red y USB del lado de los pines 39/40; USB-C abajo, del lado del pin 1 -->
+  <rect x="916" y="436" width="28" height="30" rx="3" fill="#ECEFF1" stroke="#455A64" stroke-width="1.5"/>
+  <rect x="918" y="560" width="26" height="26" rx="3" fill="#CFD8DC" stroke="#455A64" stroke-width="1.5"/>
+  <text x="910" y="577" text-anchor="end" class="onpi">USB</text>
+  <rect x="518" y="678" width="24" height="22" rx="3" fill="#CFD8DC" stroke="#455A64" stroke-width="1.5"/>
+  <text x="530" y="670" text-anchor="middle" class="onpi">USB-C</text>
 
   <!-- red: splitter -> Ethernet de la Pi -->
-  <path class="wd" d="M600 190 H440 V600 H462"/>
+  <path class="wd" d="M770 190 H1020 V219 A6 6 0 0 1 1020 231 V451 H944"/>
+  <text x="982" y="443" text-anchor="middle" font-size="10" fill="#455A64">Ethernet</text>
 
   <!-- MP1584 -->
-  <rect class="box" x="990" y="470" width="180" height="80" rx="8"/>
-  <text x="1080" y="498" class="t" text-anchor="middle">MP1584 (buck)</text>
-  <text x="1080" y="518" class="s" text-anchor="middle">salida 5,15 V</text>
-  <text x="1080" y="535" class="tiny" text-anchor="middle">ajustar 5,1–5,2 V</text>
-  <path class="gnd" d="M1130 550 V558 M1120 558 H1140 M1124 562 H1136 M1128 566 H1132"/>
-  <!-- 5,15 V -> USB-C de la Pi -->
-  <path class="w5" d="M990 530 H942"/>
-  <text x="966" y="522" text-anchor="middle" font-size="11" fill="#8E24AA">5,15 V</text>
+  <rect class="box" x="260" y="560" width="180" height="80" rx="8"/>
+  <text x="350" y="588" class="t" text-anchor="middle">MP1584 (buck)</text>
+  <text x="350" y="608" class="s" text-anchor="middle">salida 5,15 V</text>
+  <text x="350" y="625" class="tiny" text-anchor="middle">ajustar 5,1–5,2 V</text>
+  <path class="gnd" d="M290 640 V648 M280 648 H300 M284 652 H296 M288 656 H292"/>
+  <!-- 5,15 V -> USB-C de la Pi (abajo) -->
+  <path class="w5" d="M380 640 V712 H530 V700"/>
+  <text x="455" y="706" text-anchor="middle" font-size="11" fill="#8E24AA">5,15 V</text>
 
   <!-- camara -->
-  <path class="wd" d="M942 635 H990"/>
-  <rect class="box" x="990" y="600" width="180" height="70" rx="8"/>
-  <text x="1080" y="628" class="t" text-anchor="middle">Cámara ZWO</text>
-  <text x="1080" y="648" class="s" text-anchor="middle">ASI220MM Mini · USB 2.0</text>
+  <path class="wd" d="M944 573 H990"/>
+  <rect class="box" x="990" y="538" width="180" height="70" rx="8"/>
+  <text x="1080" y="566" class="t" text-anchor="middle">Cámara ZWO</text>
+  <text x="1080" y="586" class="s" text-anchor="middle">ASI220MM Mini · USB 2.0</text>
 
   <!-- ================= señales de los servos ================= -->
   <!-- servo X: señal -> pin 12, GND -> pin 14 -->
@@ -232,6 +234,7 @@
     <text x="834" y="437" text-anchor="middle" font-size="8" fill="#B0BEC5">40</text>
   </g>
 
+  <g transform="translate(0,30)">
   <!-- ================= leyenda ================= -->
   <g font-size="12" fill="#263238">
     <path class="w24" d="M30 730 H60"/><text x="66" y="734">24 V</text>
@@ -255,7 +258,9 @@
     <text x="46" y="870">4. MP1584 en 5,1–5,2 V con el potenciómetro fijado. La Pi suma ~1,5–2 A a los 7,5 V: si marca subtensión al mover los servos (<tspan font-family="Consolas, monospace">vcgencmd get_throttled</tspan> distinto de 0x0), tomar su entrada de los 24 V.</text>
     <text x="46" y="892">5. A la Pi por USB-C (conserva su protección) o por los pines 2/4 (+5 V) y un GND (sin protección). Resistencias de 470 Ω–1 kΩ en las señales: opcionales, protegen el GPIO.</text>
     <text x="46" y="914">6. Red: un PoE pasivo de 2 pares deja la red en 100 Mbps (unos 5 fps a 1080p). Para los 14 fps: inyector y splitter PoE pasivo gigabit, o un cable de red aparte para la Pi.</text>
-    <text x="46" y="936">7. Los GX3350 aceptan los 3,3 V de las señales de la Pi (probado). Los pines usados están resaltados en el conector.</text>
+    <text x="46" y="936">7. Orientación: el pin 1 está en la punta opuesta a la red y los USB; los pines 39 y 40 quedan junto al Ethernet. Los GX3350 aceptan los 3,3 V de la Pi.</text>
+  </g>
+
   </g>
 
   </g>
