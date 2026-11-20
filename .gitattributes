@@ -1,0 +1,4 @@
+# Archivos que se copian a la Raspberry: siempre con fin de linea de Linux (LF),
+# aunque Git en Windows convierta el resto a CRLF.
+*.service text eol=lf
+*.sh text eol=lf
