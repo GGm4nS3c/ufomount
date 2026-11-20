@@ -1,0 +1,41 @@
+# Servicio de la Raspberry: camara ZWO (asicam) + montura PTZ.
+#
+# Arranca solo al encender la Pi y se reinicia solo si se cae.
+# Instalacion (en la Pi, con los archivos ya en ~/asicam):
+#   sudo cp ~/asicam/asicam.service /etc/systemd/system/asicam.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now asicam
+# Uso:
+#   systemctl status asicam          estado
+#   sudo systemctl restart asicam    reiniciar (p. ej. tras copiar una version nueva)
+#   sudo systemctl stop asicam       detener (los servos quedan sueltos)
+#   sudo systemctl disable asicam    que no arranque mas al encender
+#   tail -f ~/asicam/server.log      registro
+
+[Unit]
+Description=asicam: camara ZWO y montura PTZ de ufomount
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=astroberry
+Group=astroberry
+WorkingDirectory=/home/astroberry/asicam
+# CPU a maxima frecuencia mientras corre (con "ondemand" la captura pierde cuadros
+# a 14 fps); al detenerse vuelve a "ondemand". El "+" corre esa linea como root.
+ExecStartPre=+/bin/sh -c 'for g in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do echo performance > "$g"; done'
+# --rt: hilo de captura en tiempo real (lo permite LimitRTPRIO, sin ser root).
+# --ptz on: si el PWM todavia no esta listo al arrancar, el servidor sale y
+# systemd lo vuelve a lanzar a los 3 s (en vez de quedar sin montura).
+ExecStart=/usr/bin/python3 /home/astroberry/asicam/asicam_server.py --rt --ptz on
+ExecStopPost=+/bin/sh -c 'for g in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do echo ondemand > "$g"; done'
+Restart=always
+RestartSec=3
+LimitRTPRIO=99
+Environment=PYTHONUNBUFFERED=1
+StandardOutput=append:/home/astroberry/asicam/server.log
+StandardError=append:/home/astroberry/asicam/server.log
+
+[Install]
+WantedBy=multi-user.target

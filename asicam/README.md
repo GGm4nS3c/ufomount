@@ -20,7 +20,7 @@ Probado con una **ZWO ASI220MM Mini** en una Raspberry Pi 4 con Astroberry
 | 3 | Interfaz en el PC con ajustes tipo ASIStudio (`UfomountCam.exe`) | **hecha y verificada** |
 | PTZ | Servos X/Y desde la Pi (reemplaza al Arduino), protocolo del firmware v4.1 | **hecho y verificado** |
 | 4 | Robustez: driver 1.26 para exposiciones largas, prueba larga | pendiente |
-| 5 | Servicio en la Pi (arranque automático, tiempo real) | pendiente |
+| 5 | Servicio en la Pi (arranque automático, tiempo real) | **hecha y verificada** |
 
 ## Archivos
 
@@ -30,6 +30,7 @@ asicam/
   pi/zwo_sdk.py           acceso al SDK de ZWO por ctypes
   pi/fake_camera.py       cámara simulada (--simulate), para probar sin hardware
   pi/ptz.py               control de los servos (firmware v4.1 pasado a Python)
+  pi/asicam.service       servicio de systemd: arranque automático en la Pi
   pc/asicam_client.py     librería y línea de comandos para el PC
   pc/asicam_gui.py        interfaz: vista en vivo, histograma, ajustes, foto y video
   tools/check_server.py   verificación del servidor (protocolo crudo)
@@ -45,17 +46,60 @@ El servidor solo usa la biblioteca estándar de Python (3.7 o más nuevo) y el S
 Copiar los archivos (desde la raíz del repositorio, en el PC):
 
 ```bash
-scp asicam/pi/asicam_server.py asicam/pi/zwo_sdk.py asicam/pi/ptz.py astroberry@astroberry.local:asicam/
+scp asicam/pi/asicam_server.py asicam/pi/zwo_sdk.py asicam/pi/ptz.py asicam/pi/asicam.service astroberry@astroberry.local:asicam/
 ```
 
-Arrancar el servidor en la Pi:
+### Servicio: arranque automático
+
+El servidor se instala una vez como servicio de systemd. Desde ahí **arranca solo al
+encender la Pi** y, si se cae, systemd lo vuelve a lanzar a los 3 s. Corre como el usuario
+`astroberry` (no root) con:
+- **prioridad de tiempo real** en el hilo de captura (`--rt`, permitido por `LimitRTPRIO`);
+- **la CPU a máxima frecuencia** mientras corre (gobernador `performance`; al detenerse
+  vuelve a `ondemand`). Con eso la captura llega a 14 fps sin perder cuadros (ver
+  Rendimiento).
+
+Instalación, en la Pi:
+
+```bash
+sudo cp ~/asicam/asicam.service /etc/systemd/system/asicam.service
+```
+
+```bash
+sudo systemctl daemon-reload
+```
+
+```bash
+sudo systemctl enable --now asicam
+```
+
+Uso:
+
+| Comando | Qué hace |
+|---|---|
+| `systemctl status asicam` | estado |
+| `sudo systemctl restart asicam` | reinicia (p. ej. después de copiar una versión nueva) |
+| `sudo systemctl stop asicam` | lo detiene; los servos quedan sueltos |
+| `sudo systemctl disable asicam` | que no arranque más al encender |
+| `tail -f ~/asicam/server.log` | registro |
+
+Usa `--ptz on`: si al arrancar el PWM todavía no está listo, el servidor sale y systemd lo
+vuelve a lanzar, en vez de quedar sin montura. Si la cámara no está enchufada al arrancar,
+el servidor la sigue buscando cada 3 s y la usa en cuanto aparece.
+
+Probado: con la Pi reiniciada el servicio arrancó solo en 1 s y la montura respondió desde
+el PC; matando el proceso a la fuerza, systemd lo relanzó solo.
+
+### A mano (para pruebas)
+
+Con el servicio activo los puertos están ocupados: primero `sudo systemctl stop asicam`.
 
 ```bash
 cd ~/asicam && python3 asicam_server.py
 ```
 
-Con prioridad de tiempo real (permite más fps sin perder cuadros; requiere root). Usar un
-`--config` propio para que root no se quede con el archivo de ajustes del usuario:
+Con prioridad de tiempo real a mano hace falta root; usar un `--config` propio para que root
+no se quede con el archivo de ajustes del usuario:
 
 ```bash
 cd ~/asicam && sudo python3 asicam_server.py --rt --config /home/astroberry/.config/asicam/settings-rt.json
