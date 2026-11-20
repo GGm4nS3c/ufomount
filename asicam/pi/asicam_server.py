@@ -108,6 +108,7 @@ DEFAULT_SETTINGS = {
 FAILS_BEFORE_RESTART = 3     # lecturas fallidas seguidas antes de reiniciar el video
 IDLE_CLOSE_S = 5.0           # sin clientes: soltar la camara tras estos segundos
 REOPEN_WAIT_S = 2.0          # espera entre intentos de abrir la camara
+PROBE_EVERY_S = 3.0          # si arranco sin camara, cada cuanto se la vuelve a buscar
 TEMP_EVERY_S = 2.0
 
 log = logging.getLogger("asicam")
@@ -329,6 +330,8 @@ class Capturer(threading.Thread):
         self.cam = None
         self.camera_info = None      # se conserva aunque la camara se cierre
         self.controls = None
+        self._probe_t = 0.0          # ultima busqueda de la camara
+        self._probe_warned = False   # el aviso de "no hay camara", una sola vez
         self.lock = threading.Lock()  # protege el estado de abajo
         self.state = "inactiva"
         self.last_error = ""
@@ -391,10 +394,13 @@ class Capturer(threading.Thread):
     # ---- camara ----
     def probe(self):
         """Abre la camara un momento para conocer sus datos y la cierra."""
+        self._probe_t = time.monotonic()
         try:
             cam = self.sdk.open(self.camera_index)
         except Z.ASIError as e:
-            log.warning("no hay camara al iniciar: %s", e)
+            if not self._probe_warned:
+                log.warning("no hay camara: %s (se sigue buscando cada %.0f s)", e, PROBE_EVERY_S)
+                self._probe_warned = True
             return False
         try:
             self.camera_info, self.controls = cam.info, cam.controls
@@ -402,6 +408,7 @@ class Capturer(threading.Thread):
                      cam.info["max_height"], cam.info["formats"], cam.info["bins"])
         finally:
             cam.close()
+        self._probe_warned = False
         return True
 
     def _open(self):
@@ -487,6 +494,10 @@ class Capturer(threading.Thread):
                     elif time.monotonic() - idle_since >= IDLE_CLOSE_S:
                         self._close()
                         self._set_state("inactiva")
+                elif self.camera_info is None and time.monotonic() - self._probe_t >= PROBE_EVERY_S:
+                    # arranco sin camara: se la sigue buscando, asi "info" funciona
+                    # en cuanto se enchufa (sin esto habia que reiniciar el servidor)
+                    self.probe()
                 self.stop_event.wait(0.2)
                 continue
             idle_since = None
