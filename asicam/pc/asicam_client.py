@@ -17,6 +17,7 @@ Uso como libreria:
 Uso por linea de comandos:
 
     python asicam_client.py find
+    python asicam_client.py find 192.168.201.0           (tambien recorre esa red /24)
     python asicam_client.py [--host IP] info | status | get
     python asicam_client.py [--host IP] set exposure_us=27000 gain=0 auto_exposure=false
     python asicam_client.py [--host IP] stream 10
@@ -28,6 +29,7 @@ Requiere numpy. Protocolo en asicam/README.md.
 import argparse
 import json
 import queue
+import re
 import socket
 import struct
 import sys
@@ -103,16 +105,49 @@ def _local_broadcasts():
     return out
 
 
+_NET_RE = re.compile(r"^(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?:\.(?:\d{1,3}|x|\*))?(?:/24)?$")
+
+
+def expand_targets(targets):
+    """A quien preguntar, ademas del broadcast local.
+
+    Cada IP o red ("192.168.201.46", "192.168.201.0", "192.168.201.x", "192.168.201.0/24")
+    se recorre en su red /24 completa: el broadcast no cruza routers, la Pi puede haber
+    cambiado de IP (DHCP) o contestar desde otra de sus IPs. Un nombre de equipo
+    (p. ej. astroberry.local) se pregunta tal cual. Acepta "ip:puerto".
+    """
+    out, nets = [], set()
+    for t in targets or ():
+        host = str(t).strip().split(":")[0]
+        if not host:
+            continue
+        m = _NET_RE.match(host)
+        if not m:
+            out.append(host)
+            continue
+        octets = [int(x) for x in m.groups()]
+        if max(octets) > 255:
+            continue
+        net = "%d.%d.%d" % tuple(octets)
+        if net not in nets:
+            nets.add(net)
+            out.extend("%s.%d" % (net, i) for i in range(1, 255))
+    return out
+
+
 def discover(timeout=1.5, targets=(), port=CTRL_PORT):
-    """Busca servidores asicam. Devuelve una lista de dicts (con la clave 'ip')."""
+    """Busca servidores asicam. Devuelve una lista de dicts (con la clave 'ip').
+
+    `targets`: IPs o redes de otras subredes (ver expand_targets).
+    """
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
     s.settimeout(0.2)
-    for d in list(_local_broadcasts()) + list(targets):
+    for d in list(_local_broadcasts()) + expand_targets(targets):
         try:
             s.sendto(b"ASICAM?", (d, port))
         except OSError:
-            pass
+            pass                  # p. ej. red inalcanzable o nombre que no resuelve
     found = {}
     end = time.monotonic() + timeout
     while time.monotonic() < end:
@@ -120,6 +155,8 @@ def discover(timeout=1.5, targets=(), port=CTRL_PORT):
             data, addr = s.recvfrom(4096)
         except socket.timeout:
             continue
+        except ConnectionResetError:
+            continue              # Windows: un "puerto cerrado" (ICMP) de otro equipo
         except OSError:
             break
         if data.startswith(b"ASICAM "):
@@ -472,7 +509,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="Cliente de asicam (relay de camara ZWO en la Raspberry)")
     ap.add_argument("--host", help="IP del servidor (si no, se busca en la red)")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("find", help="busca servidores en la red")
+    p = sub.add_parser("find", help="busca servidores en la red local (y en las redes /24 indicadas)")
+    p.add_argument("redes", nargs="*", help="IP o red de otra subred, p. ej. 192.168.201.0")
     sub.add_parser("info", help="datos de la camara y rangos de los ajustes")
     sub.add_parser("status", help="estado del servidor")
     sub.add_parser("get", help="ajustes actuales")
@@ -485,7 +523,7 @@ def main(argv=None):
     a = ap.parse_args(argv)
 
     if a.cmd == "find":
-        for s in discover():
+        for s in discover(targets=a.redes):
             print(json.dumps(s, ensure_ascii=False))
         return
     with AsiCam(_pick_host(a.host)) as cam:

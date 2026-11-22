@@ -204,7 +204,8 @@ python asicam/pc/asicam_gui.py --host 192.168.200.159 --selftest
 import sys; sys.path.insert(0, "asicam/pc")
 from asicam_client import AsiCam, discover, save_fits
 
-print(discover())                          # servidores en la red
+print(discover())                          # servidores en la red local
+print(discover(targets=["192.168.201.0"])) # y en otra red /24 (detrás de un router)
 with AsiCam("192.168.200.159") as cam:
     cam.info()                             # cámara y rangos de cada ajuste
     cam.set(exposure_us=27000, gain=0)     # en vivo; error -> AsiCamError
@@ -231,6 +232,14 @@ Línea de comandos:
 
 ```bash
 python asicam/pc/asicam_client.py find
+```
+
+Si la Pi está en otra red (el broadcast no cruza routers), indicar una IP o la red, y se
+recorre esa red /24 completa. Lo mismo vale para el campo **Servidor** de la interfaz y la
+barra de `Ufomount.exe`: escribir `192.168.201.0` y pulsar **Buscar**.
+
+```bash
+python asicam/pc/asicam_client.py find 192.168.201.0
 ```
 
 ```bash
@@ -319,7 +328,10 @@ Mandar `ASICAM?` (broadcast o directo). Respuesta: `ASICAM ` seguido de un JSON:
 ```
 
 En Windows conviene mandarlo también al broadcast de la red (`192.168.200.255`), porque
-`255.255.255.255` puede salir por una interfaz virtual (Hyper-V, WSL).
+`255.255.255.255` puede salir por una interfaz virtual (Hyper-V, WSL). Para otra subred,
+`discover(targets=...)` pregunta a cada dirección de su /24: así también llega la respuesta
+cuando la Pi contesta desde otra de sus IPs (el firewall de Windows solo deja pasar la
+respuesta de una dirección a la que se preguntó).
 
 ### Control (TCP 5300)
 
