@@ -108,6 +108,22 @@ def last_host():
     return CAM.load_cfg().get("host") or ""
 
 
+def known_hints():
+    """IPs donde ya se encontro o uso la Pi: Buscar recorre sus redes /24, asi la encuentra
+    aunque este en otra subred (el broadcast no cruza routers) o haya cambiado de IP."""
+    hints = [h for h in CAM.load_cfg().get("hosts", []) if isinstance(h, str) and h]
+    hints += PTZ.ip_hints(PTZ.load_cfg().get("port", ""))
+    return list(dict.fromkeys(hints))
+
+
+def nets_of(hints):
+    return sorted({h.split(":")[0].rsplit(".", 1)[0] + ".x" for h in PTZ.ip_hints(" ".join(hints))})
+
+
+NOT_FOUND_HINT = ("no encontré la Raspberry. Si está en otra red, escribe una IP de esa red "
+                  "(p. ej. 192.168.201.0) y pulsa Buscar")
+
+
 def default_ptz_port(host=None):
     if host:
         return "%s:%d" % (host, PTZ_PORT)
@@ -204,6 +220,22 @@ class PiPtz(PTZ.PtzGui):
         if isinstance(event.widget, (ttk.Scale, tk.Scale, tk.Text, tk.Listbox)):
             return
         super()._key_press(event)
+
+    def find_mounts(self):
+        """Como la original, pero recorre tambien las redes donde ya se uso la Pi."""
+        hints = set(PTZ.ip_hints(self.port_var.get()))
+        hints.update(PTZ.ip_hints(PTZ.load_cfg().get("port", "")))
+        hints.update(known_hints())
+        nets = nets_of(sorted(hints))
+        self.log_line("buscando la Raspberry en la red local" + (" y en %s" % ", ".join(nets) if nets else "")
+                      + "...", "info")
+        self.find_btn.configure(state="disabled")
+        threading.Thread(target=lambda: self.rxq.put(("found", PTZ.discover(hints))), daemon=True).start()
+
+    def _show_found(self, found):
+        super()._show_found(found)        # si no hay nada, ya explica como buscar en otra red
+        if found and not self.link.connected:
+            self.toggle_conn()            # encontrada: conectar sin otro clic
 
 
 def draw_icon(c, key):
@@ -497,15 +529,19 @@ class ModeWindow:
 
     # ------------------------------------------------- conexion (modo completo)
     def find(self):
+        """Busca en la red local y en las redes /24 del campo Raspberry (puede ser una red,
+        p. ej. 192.168.201.0) y de las IPs donde ya se uso la Pi."""
         self.find_btn.configure(state="disabled")
-        self.hint_lbl.configure(text="buscando la Raspberry…", fg=C_MUTED)
-        hint = self.host_var.get().strip()
-        self.cam.worker.submit(lambda: discover(targets=[hint] if hint else []), self._found, self._found)
+        hints = [h for h in [self.host_var.get().strip()] + known_hints() if h]
+        nets = nets_of(hints)
+        self.hint_lbl.configure(text="buscando la Raspberry en la red local" + (
+            " y en %s" % ", ".join(nets) if nets else "") + "…", fg=C_MUTED)
+        self.cam.worker.submit(lambda: discover(targets=hints), self._found, self._found)
 
     def _found(self, res):
         self.find_btn.configure(state="normal")
         if isinstance(res, Exception) or not res:
-            self.hint_lbl.configure(text="no encontré la Raspberry (¿servidor corriendo?)", fg=C_WARN)
+            self.hint_lbl.configure(text=NOT_FOUND_HINT, fg=C_WARN)
             return
         ips = [s["ip"] for s in res]
         self.host_cb.configure(values=ips)

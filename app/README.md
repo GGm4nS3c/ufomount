@@ -14,6 +14,11 @@ Al abrir aparece un menú con tres modos (teclas 1, 2, 3):
 
 El botón **◂ Menú** vuelve al menú en cualquier modo; al salir de un modo la montura recibe STOP.
 
+**Buscar** recorre la red local y también las redes donde ya se usó la Pi. Si la Pi está en
+otra red (por ejemplo detrás de un router, en `192.168.201.x`), escribir una IP de esa red
+(`192.168.201.0`) en el campo **Raspberry** (o **Puerto** en el modo Montura) y pulsar
+**Buscar**: recorre esa red completa y conecta al encontrarla. Después la recuerda.
+
 Teclado: las **flechas** mueven la montura y **Espacio** la detiene, salvo mientras se escribe
 en un campo (exposición, puerto…). Un clic en cualquier otra parte devuelve las flechas a la
 montura.
