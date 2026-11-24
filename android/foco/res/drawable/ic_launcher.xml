@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- reticula de enfoque con los colores de UFOMOUNT (azul = tilt, naranja = pan) -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <path android:fillColor="#14191F" android:pathData="M24,1a23,23 0 1,0 0.01,0z" />
+    <path android:fillColor="#00000000" android:strokeColor="#64B5F6" android:strokeWidth="3"
+        android:pathData="M24,9a15,15 0 1,0 0.01,0z" />
+    <path android:fillColor="#00000000" android:strokeColor="#F08A2E" android:strokeWidth="2.5"
+        android:pathData="M24,4V15M24,33V44M4,24H15M33,24H44" />
+    <path android:fillColor="#F08A2E" android:pathData="M24,21a3,3 0 1,0 0.01,0z" />
+</vector>
