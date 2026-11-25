@@ -38,7 +38,9 @@ SUBNETS = ("192.168.77.0/24", "192.168.177.0/24", "10.77.77.0/24", "172.27.77.0/
 FIRST_HOST, LAST_HOST = 10, 60          # rango que se entrega
 LEASE_S = 3600
 RULE_NAME = "UFOMOUNT conexion directa (DHCP)"
+WSAEACCES, WSAEADDRINUSE = 10013, 10048
 CTRL_PORT = 5300
+DHCP_PORT = 67
 
 # fabricantes de MAC a los que se les entrega IP: nadie mas recibe respuesta
 MOUNT_MACS = ("b827eb", "dca632", "e45f01", "d83add", "2ccf67", "28cdc1", "88a29e",   # Raspberry Pi
@@ -167,6 +169,87 @@ def probe_packet(mac, xid):
 
 
 # ----------------------------------------------------------------------------
+# DHCP sin abrir el puerto 67 (otro programa lo tiene reservado)
+# ----------------------------------------------------------------------------
+
+def checksum(data):
+    if len(data) % 2:
+        data += b"\0"
+    n = sum(struct.unpack("!%dH" % (len(data) // 2), data))
+    while n >> 16:
+        n = (n & 0xFFFF) + (n >> 16)
+    return ~n & 0xFFFF
+
+
+def udp_datagram(src, dst, payload, sport=67, dport=68):
+    """Cabecera UDP + datos, con su suma (el IP lo arma Windows)."""
+    n = 8 + len(payload)
+    head = struct.pack("!HHHH", sport, dport, n, 0)
+    pseudo = socket.inet_aton(src) + socket.inet_aton(dst) + struct.pack("!BBH", 0, 17, n)
+    c = checksum(pseudo + head + payload) or 0xFFFF
+    return struct.pack("!HHHH", sport, dport, n, c) + payload
+
+
+def dhcp_payload(pkt):
+    """(datos, ip de origen) si es un paquete IP con un pedido DHCP (68 -> 67); si no, None."""
+    if len(pkt) < 28 or pkt[0] >> 4 != 4 or pkt[9] != 17:
+        return None
+    ihl = (pkt[0] & 15) * 4
+    if ihl < 20 or len(pkt) < ihl + 8 or struct.unpack("!H", pkt[6:8])[0] & 0x3FFF:
+        return None                  # cabecera rara o fragmento
+    sport, dport, n = struct.unpack("!HHH", pkt[ihl:ihl + 6])
+    if (sport, dport) != (68, 67) or n < 8 or len(pkt) < ihl + n:
+        return None
+    return pkt[ihl + 8:ihl + n], socket.inet_ntoa(pkt[12:16])
+
+
+class RawDhcpSocket:
+    """Como un socket UDP en ip:67, pero leyendo los paquetes IP del puerto Ethernet: no
+    choca con el programa que tenga reservado el 67. Necesita administrador."""
+
+    def __init__(self, ip, ifindex):
+        self.ip = ip
+        self.rx = self.tx = None
+        try:
+            self.rx = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_IP)
+            self.rx.bind((ip, 0))
+            self.rx.ioctl(socket.SIO_RCVALL, socket.RCVALL_IPLEVEL)
+            self.tx = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_UDP)
+            self.tx.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            try:
+                self.tx.setsockopt(socket.IPPROTO_IP, 31, struct.pack("!I", int(ifindex)))
+            except OSError:
+                pass
+            self.tx.bind((ip, 0))
+        except OSError:
+            self.close()
+            raise
+
+    def settimeout(self, t):
+        self.rx.settimeout(t)
+
+    def recvfrom(self, size):
+        end = time.monotonic() + (self.rx.gettimeout() or 0.5)
+        while True:
+            got = dhcp_payload(self.rx.recvfrom(65535)[0])
+            if got is not None:
+                return got[0][:size], (got[1], 68)
+            if time.monotonic() > end:
+                raise socket.timeout()
+
+    def sendto(self, data, dst):
+        self.tx.sendto(udp_datagram(self.ip, dst[0], data), (dst[0], 0))
+
+    def close(self):
+        for x in (self.rx, self.tx):
+            if x is not None:
+                try:
+                    x.close()
+                except OSError:
+                    pass
+
+
+# ----------------------------------------------------------------------------
 # Windows
 # ----------------------------------------------------------------------------
 
@@ -244,6 +327,7 @@ class WindowsOps:
         self.coexist_set = False
         self.ip_added = None
         self.had_dhcp = False
+        self.notes = []              # avisos para mostrar en el programa
 
     def adapters(self):
         return all_adapters()
@@ -307,6 +391,19 @@ class WindowsOps:
         if not ok:
             raise RuntimeError("no pude abrir el firewall para DHCP: " + msg)
 
+    def port67_owners(self):
+        """Que programas usan el puerto 67 ("svchost (SharedAccess) en 172.29.144.1")."""
+        script = ("[Console]::OutputEncoding=[Text.Encoding]::UTF8; $ErrorActionPreference='SilentlyContinue';"
+                  "Get-NetUDPEndpoint -LocalPort 67 | ForEach-Object { $p=$_.OwningProcess;"
+                  "$v=(Get-CimInstance Win32_Service -Filter \"ProcessId=$p\").Name -join ',';"
+                  "'{0}{1} en {2}' -f (Get-Process -Id $p).ProcessName, $(if($v){\" ($v)\"}), $_.LocalAddress }")
+        try:
+            out = run([system_tool("WindowsPowerShell", "v1.0", "powershell.exe"), "-NoProfile",
+                       "-NonInteractive", "-Command", script], timeout=30).stdout.decode("utf-8", "replace")
+        except (OSError, subprocess.SubprocessError):
+            return "no pude averiguarlo"
+        return "; ".join(x.strip() for x in out.splitlines() if x.strip()) or "Windows no dice quién"
+
     def cleanup(self, a):
         self._netsh("advfirewall", "firewall", "delete", "rule", "name=" + RULE_NAME)
         if a is None:
@@ -328,6 +425,32 @@ class WindowsOps:
     def server_socket(self, ip, ifindex):
         """Socket en el puerto 67 de esa IP: en Windows recibe los broadcast de ese puerto
         Ethernet y de ningun otro."""
+        s = self._udp_socket(ip, ifindex)
+        if s is not None:
+            return s
+        self.notes.append("otro programa tiene reservado el puerto DHCP (UDP 67): %s" % self.port67_owners())
+        end = time.monotonic() + 10  # la IP nueva tarda unos segundos en quedar lista
+        while True:
+            try:
+                s = RawDhcpSocket(ip, ifindex)
+                break
+            except OSError as e:
+                if time.monotonic() > end:
+                    raise RuntimeError("no pude escuchar DHCP en %s, ni por la segunda vía: %s" % (ip, e))
+                time.sleep(0.5)
+        s.settimeout(0.5)
+        # los paquetes llegan sin pasar por el puerto 67: la regla es por el puerto de origen
+        ok, msg = self._netsh("advfirewall", "firewall", "add", "rule", "name=" + RULE_NAME, "dir=in",
+                              "action=allow", "protocol=UDP", "remoteport=68",
+                              "program=" + sys.executable, "profile=any")
+        if not ok:
+            s.close()
+            raise RuntimeError("no pude abrir el firewall para DHCP: " + msg)
+        self.notes.append("uso la segunda vía, que no necesita ese puerto")
+        return s
+
+    def _udp_socket(self, ip, ifindex):
+        """El socket normal; None si otro programa tiene el puerto."""
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         try:                         # IP_UNICAST_IF: que los broadcast salgan por este puerto
@@ -337,12 +460,15 @@ class WindowsOps:
         end = time.monotonic() + 12  # Windows tarda unos segundos en dar por buena la IP nueva
         while True:
             try:
-                s.bind((ip, 67))
+                s.bind((ip, DHCP_PORT))
                 s.settimeout(0.5)
                 return s
             except OSError as e:
-                if time.monotonic() > end:
+                busy = getattr(e, "winerror", 0) in (WSAEACCES, WSAEADDRINUSE)
+                if time.monotonic() > end - (9 if busy else 0):
                     s.close()
+                    if busy:
+                        return None
                     raise RuntimeError("no pude escuchar DHCP en %s: %s" % (ip, e))
                 time.sleep(0.5)
 
@@ -405,6 +531,8 @@ def run_helper(port, token, ifindex, ops=None):
         ops.add_ip(adapter, ip, str(net.netmask))
         ops.open_firewall()
         sock = ops.server_socket(ip, adapter["index"])
+        for text in getattr(ops, "notes", ()):
+            say("info", text=text)
         srv = DhcpServer(ip, str(net), on_lease=lambda m, i: say("lease", mac=mac_text(m), ip=i))
         say("ready", ip=ip, net=str(net))
         told = set()

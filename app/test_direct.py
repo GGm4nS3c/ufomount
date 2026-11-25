@@ -154,6 +154,51 @@ for i in range(20000):
             break
 check("20.000 paquetes dañados: ninguno lo bota", bad == 0)
 
+print("Segunda via (puerto 67 ocupado)")
+
+
+def ip_pkt(payload, sport=68, dport=67, proto=17, frag=0, opts=b""):
+    u = struct.pack("!HHHH", sport, dport, 8 + len(payload), 0) + payload
+    ihl = 5 + len(opts) // 4
+    return (struct.pack("!BBHHHBBH4s4s", 0x40 | ihl, 0, ihl * 4 + len(u), 1, frag, 64, proto, 0, b"\0" * 4, b"\xff" * 4)
+            + opts + u)
+
+
+q = pkt(D.DISCOVER)
+check("lee un pedido DHCP", D.dhcp_payload(ip_pkt(q)) == (q, "0.0.0.0"))
+check("con opciones IP y relleno Ethernet", D.dhcp_payload(ip_pkt(q, opts=b"\x01" * 4) + b"\0" * 9) == (q, "0.0.0.0"))
+check("ignora TCP, otros puertos y fragmentos", D.dhcp_payload(ip_pkt(q, proto=6)) is None
+      and D.dhcp_payload(ip_pkt(q, dport=68)) is None and D.dhcp_payload(ip_pkt(q, frag=0x2000)) is None)
+bad = 0
+for i in range(20000):
+    b = bytearray(ip_pkt(q))
+    for _ in range(rnd.randrange(1, 8)):
+        b[rnd.randrange(60)] = rnd.randrange(256)
+    try:
+        D.dhcp_payload(bytes(b[:rnd.randrange(len(b) + 1)]))
+    except Exception as e:  # noqa: BLE001
+        bad += 1
+        print("   ", repr(e))
+        break
+check("20.000 paquetes IP dañados: ninguno lo bota", bad == 0)
+d = D.udp_datagram(IP, "255.255.255.255", b"hola!")
+ph = socket.inet_aton(IP) + b"\xff" * 4 + struct.pack("!BBH", 0, 17, len(d))
+check("suma UDP correcta", D.checksum(ph + d) == 0 and struct.unpack("!HH", d[:4]) == (67, 68))
+# el choque real de Windows, en otro puerto y sin administrador
+w = D.WindowsOps()
+h = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+h.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+h.bind(("0.0.0.0", 0))
+real67, D.DHCP_PORT = D.DHCP_PORT, h.getsockname()[1]
+t0 = time.time()
+check("puerto reservado por otro (10013): se detecta", w._udp_socket("127.0.0.1", 1) is None, "%.1f s" % (time.time() - t0))
+h.close()
+u = w._udp_socket("127.0.0.1", 1)
+check("libre otra vez: el socket normal", u is not None)
+u.close()
+D.DHCP_PORT = real67
+check("dice quién usa el puerto", isinstance(w.port67_owners(), str), w.port67_owners())
+
 print("Puertos")
 check("con IP de router: no se usa", D.problem(adapter(ips=[{"ip": "192.168.200.10", "len": 24, "origin": "Dhcp"}])) != "")
 check("con puerta de enlace: no se usa", D.problem(adapter(gw=True)) != "")

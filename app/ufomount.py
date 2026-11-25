@@ -51,7 +51,7 @@ import ptz_gui as PTZ  # noqa: E402
 from asicam_client import discover  # noqa: E402
 
 APP = "UFOMOUNT"
-VERSION = "0.2.0"
+VERSION = "0.2.1"
 CONFIG_PATH = Path.home() / ".ufomount_app.json"
 PTZ_PORT = 5000
 CAM_CTRL_PORT = 5300
