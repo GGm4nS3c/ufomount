@@ -40,17 +40,18 @@ from tkinter import ttk
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
-for _sub in (("scripts",), ("asicam", "pc")):
+for _sub in (("app",), ("scripts",), ("asicam", "pc")):
     _p = os.path.join(REPO, *_sub)
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
 import asicam_gui as CAM  # noqa: E402
+import direct_link  # noqa: E402
 import ptz_gui as PTZ  # noqa: E402
 from asicam_client import discover  # noqa: E402
 
 APP = "UFOMOUNT"
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 CONFIG_PATH = Path.home() / ".ufomount_app.json"
 PTZ_PORT = 5000
 CAM_CTRL_PORT = 5300
@@ -108,6 +109,17 @@ def last_host():
     return CAM.load_cfg().get("host") or ""
 
 
+def remember_host(host):
+    """La Raspberry quedo en `host`: los tres modos parten de ahi."""
+    if not SAVE_PREFS:
+        return
+    cfg = CAM.load_cfg()
+    hosts = [h for h in cfg.get("hosts", []) if isinstance(h, str) and h != host]
+    cfg["host"], cfg["hosts"] = host, ([host] + hosts)[:8]
+    CAM.save_cfg(cfg)
+    PTZ.save_cfg(port="%s:%d" % (host, PTZ_PORT))
+
+
 def known_hints():
     """IPs donde ya se encontro o uso la Pi: Buscar recorre sus redes /24, asi la encuentra
     aunque este en otra subred (el broadcast no cruza routers) o haya cambiado de IP."""
@@ -163,6 +175,196 @@ def style_root(root):
     root.option_add("*TCombobox*Listbox.background", C_PANEL2)
     root.option_add("*TCombobox*Listbox.foreground", C_TEXT)
     root.option_add("*TCombobox*Listbox.selectBackground", C_LINE)
+
+
+# ----------------------------------------------------------------------------
+# Conexion directa: sin router ni DHCP, el programa entrega las IP
+# ----------------------------------------------------------------------------
+
+DIRECT = direct_link.DirectLink()
+DIRECT_TEXT = ("Para conectar la montura directo a este PC (o por un switch) cuando no hay un router que "
+               "entregue IP. El programa le pone una IP a este puerto y le da otra a la Raspberry. "
+               "No hay que cambiar nada en ella.\n\n"
+               "Windows pedirá permiso de administrador. Al detener, o al cerrar UFOMOUNT, "
+               "el puerto queda como estaba.")
+
+
+class DirectDialog:
+    """Ventana de la conexion directa; `on_found(ip)` al contestar la Raspberry."""
+
+    open_one = None
+
+    def __init__(self, root, on_found=None, link=None):
+        self.link = link or DIRECT
+        self.on_found = on_found
+        self.adapters = []
+        self._scan = {}              # respuesta del hilo que mira los puertos
+        self._probe = {}             # respuesta del hilo que busca la Raspberry
+        self._shown = None
+        self._announced = None
+        self._ready_t = None
+        t = self.win = tk.Toplevel(root, bg=C_BG)
+        t.title("Conexión directa (sin router)")
+        t.geometry("600x430+%d+%d" % (max(0, root.winfo_rootx() + (root.winfo_width() - 600) // 2),
+                                      max(0, root.winfo_rooty() + (root.winfo_height() - 430) // 3)))
+        t.minsize(520, 380)
+        t.transient(root)
+        st = ttk.Style(root)         # solo aqui: la lista de solo lectura sale clara con clam
+        st.map("Direct.TCombobox", fieldbackground=[("disabled", C_PANEL), ("readonly", C_PANEL2)],
+               foreground=[("disabled", C_MUTED), ("readonly", C_TEXT)],
+               selectbackground=[("readonly", C_PANEL2)], selectforeground=[("readonly", C_TEXT)])
+        tk.Label(t, text="Conexión directa (sin router)", bg=C_BG, fg=C_TEXT,
+                 font=("Segoe UI", 14, "bold")).pack(anchor="w", padx=18, pady=(16, 4))
+        tk.Label(t, text=DIRECT_TEXT, bg=C_BG, fg=C_MUTED, justify="left", wraplength=560).pack(
+            anchor="w", padx=18)
+        row = tk.Frame(t, bg=C_BG)
+        row.pack(fill="x", padx=18, pady=(12, 4))
+        tk.Label(row, text="Puerto Ethernet:", bg=C_BG, fg=C_MUTED).pack(side="left")
+        self.adapter_var = tk.StringVar()
+        self.adapter_cb = ttk.Combobox(row, textvariable=self.adapter_var, state="readonly", width=44,
+                                       style="Direct.TCombobox")
+        self.adapter_cb.pack(side="left", padx=6, fill="x", expand=True)
+        self.rescan_btn = ttk.Button(row, text="↻", width=3, command=self.scan)
+        self.rescan_btn.pack(side="left")
+        # la barra antes que el registro: asi no queda fuera si la ventana es chica
+        bar = tk.Frame(t, bg=C_BG)
+        bar.pack(fill="x", side="bottom", padx=18, pady=(2, 14))
+        self.go_btn = ttk.Button(bar, text="Activar", command=self.toggle)
+        self.go_btn.pack(side="left")
+        ttk.Button(bar, text="Cerrar", command=self.close).pack(side="right")
+        self.note = tk.Label(bar, text="", bg=C_BG, fg=C_MUTED, justify="left", wraplength=380)
+        self.note.pack(side="left", padx=10)
+        self.log = tk.Text(t, height=6, bg=C_PANEL, fg=C_TEXT, bd=0, highlightthickness=0, wrap="word",
+                           padx=8, pady=6, state="disabled", takefocus=0)
+        self.log.pack(fill="both", expand=True, padx=18, pady=6)
+        t.protocol("WM_DELETE_WINDOW", self.close)
+        t.bind("<Escape>", self._escape)
+        DirectDialog.open_one = self
+        self.scan()
+        self._tick()
+
+    @classmethod
+    def show(cls, root, on_found=None):
+        d = cls.open_one
+        if d is not None and d.alive():
+            d.win.lift()
+            return d
+        return cls(root, on_found)
+
+    def alive(self):
+        try:
+            return bool(self.win.winfo_exists())
+        except tk.TclError:
+            return False
+
+    def _escape(self, _e):
+        self.close()
+        return "break"
+
+    def close(self):
+        """Solo cierra la ventana: la conexion directa sigue hasta Detener o salir."""
+        DirectDialog.open_one = None
+        try:
+            self.win.destroy()
+        except tk.TclError:
+            pass
+
+    def scan(self):
+        if self.link.active:
+            return
+        self.rescan_btn.configure(state="disabled")
+        self.adapter_var.set("buscando puertos…")
+        box = self._scan = {}
+
+        def work():
+            try:
+                box["res"] = [a for a in direct_link.all_adapters() if direct_link.is_wired(a)]
+            except Exception as e:  # noqa: BLE001
+                box["res"] = e
+        threading.Thread(target=work, daemon=True).start()
+
+    def _scanned(self, res):
+        self.rescan_btn.configure(state="normal")
+        if isinstance(res, Exception):
+            self.adapter_var.set("no pude leer los puertos: %s" % res)
+            return
+        self.adapters = sorted(res, key=lambda a: bool(direct_link.problem(a)))
+        names = []
+        for a in self.adapters:
+            names.append("%s — %s" % (a["name"], direct_link.problem(a) or "listo"))
+        self.adapter_cb.configure(values=names)
+        if names:
+            self.adapter_cb.current(0)
+        else:
+            self.adapter_var.set("este PC no tiene un puerto Ethernet")
+
+    def selected(self):
+        i = self.adapter_cb.current()
+        return self.adapters[i] if 0 <= i < len(self.adapters) else None
+
+    def toggle(self):
+        if self.link.active:
+            self.link.stop()
+            return
+        a = self.selected()
+        if a is None:
+            return
+        why = direct_link.problem(a)
+        if why:
+            self.note.configure(text="%s: %s" % (a["name"], why), fg=C_WARN)
+            return
+        self.note.configure(text="", fg=C_MUTED)
+        self._announced = self._ready_t = None
+        self._probe = {}
+        self.link.start(a["index"])
+
+    def _tick(self):
+        if not self.alive():
+            return
+        if "res" in self._scan:
+            res, self._scan = self._scan["res"], {}
+            self._scanned(res)
+        if self.link.state == "ready":
+            self._look_for_mount()
+        self.go_btn.configure(text="Detener" if self.link.active else "Activar")
+        self.adapter_cb.configure(state="disabled" if self.link.active else "readonly")
+        lines = "\n".join(self.link.lines)
+        if lines != self._shown:
+            self._shown = lines
+            self.log.configure(state="normal")
+            self.log.delete("1.0", "end")
+            self.log.insert("end", lines)
+            self.log.see("end")
+            self.log.configure(state="disabled")
+        self.win.after(300, self._tick)
+
+    def _look_for_mount(self):
+        """Cuando la montura ya tiene IP y su servidor contesta, avisa una vez."""
+        lk = self.link
+        if self._ready_t is None:
+            self._ready_t = time.monotonic()
+        if self._announced:
+            return
+        if "ip" in self._probe:
+            ip, self._probe = self._probe["ip"], {}
+            if ip:
+                self._announced = ip
+                remember_host(ip)
+                lk._line("la Raspberry contesta en %s: lista para conectar" % ip)
+                self.note.configure(text="Raspberry en %s" % ip, fg=C_OK)
+                if self.on_found is not None:
+                    self.on_found(ip)
+        elif not self._probe and lk.mounts:
+            box = self._probe = {"busy": True}
+
+            def work():
+                ip = lk.reachable()
+                if not ip:
+                    time.sleep(1.0)
+                box["ip"] = ip
+            threading.Thread(target=work, daemon=True).start()
+        elif not lk.mounts and time.monotonic() - self._ready_t > 45:
+            self.note.configure(text="si no aparece, desconecta y conecta el cable de la montura", fg=C_WARN)
 
 
 # ----------------------------------------------------------------------------
@@ -291,8 +493,11 @@ class Menu:
         foot = tk.Frame(r, bg=C_BG)
         foot.pack(fill="x", side="bottom", padx=28, pady=(0, 16))
         host = last_host()
-        tk.Label(foot, text=("Raspberry: %s" % host) if host else "Raspberry: se busca al conectar",
-                 bg=C_BG, fg=C_MUTED).pack(side="left")
+        self.host_lbl = tk.Label(foot, text=("Raspberry: %s" % host) if host else "Raspberry: se busca al conectar",
+                                 bg=C_BG, fg=C_MUTED)
+        self.host_lbl.pack(side="left")
+        self.direct_btn = ttk.Button(foot, text="Conexión directa (sin router)…", command=self.direct)
+        self.direct_btn.pack(side="left", padx=12)
         tk.Label(foot, text="v%s  ·  teclas 1, 2, 3  ·  Esc: salir" % VERSION, bg=C_BG,
                  fg=C_MUTED).pack(side="right")
         r.bind("<Escape>", lambda e: r.destroy())
@@ -324,6 +529,9 @@ class Menu:
                 wire(child)
         wire(f)
         return f
+
+    def direct(self):
+        DirectDialog.show(self.root, lambda ip: self.host_lbl.configure(text="Raspberry: %s" % ip))
 
     def choose(self, key):
         self.choice = key
@@ -517,6 +725,8 @@ class ModeWindow:
         self.find_btn.pack(side="left", padx=(4, 0))
         self.conn_btn = ttk.Button(bar, text="Conectar", command=self.toggle_connection)
         self.conn_btn.pack(side="left", padx=8)
+        self.direct_btn = ttk.Button(bar, text="Sin router…", command=self.direct)
+        self.direct_btn.pack(side="left")
         self.hint_lbl = tk.Label(bar, text="", bg=C_PANEL, fg=C_MUTED)
         self.hint_lbl.pack(side="left", padx=6)
         ttk.Button(bar, text="◂ Menú", command=self.to_menu).pack(side="right", padx=(8, 2))
@@ -549,6 +759,22 @@ class ModeWindow:
         self.hint_lbl.configure(text="encontrada: %s (%s)" % (ips[0], res[0].get("host")), fg=C_OK)
         if not self.want:
             self.toggle_connection()      # encontrada: conectar sin otro clic
+
+    def direct(self):
+        DirectDialog.show(self.root, self._direct_found)
+
+    def _direct_found(self, ip):
+        if self.host_var.get().strip() != ip:     # estaba con la IP de antes
+            if self.ptz.link.connected:
+                self.ptz.toggle_conn()
+            if self.cam.cam is not None:
+                self.cam.disconnect()
+        self.host_var.set(ip)
+        self.hint_lbl.configure(text="encontrada: %s (conexión directa)" % ip, fg=C_OK)
+        self.want = True                          # _header_tick conecta montura y camara
+        self._ptz_try_t = self._cam_try_t = 0.0
+        self._ptz_tries = 0
+        save_cfg(host=ip)
 
     def _connected_any(self):
         cam = self.cam
@@ -1027,7 +1253,14 @@ def main(argv=None):
     ap.add_argument("--fullscreen", action="store_true", help="con --mode full: arranca en pantalla completa")
     ap.add_argument("--simulate", action="store_true", help="levanta un servidor simulado local y se conecta")
     ap.add_argument("--selftest", action="store_true", help="prueba automática de los tres modos y sale")
+    # uso interno: el ayudante con permisos de administrador de la conexion directa
+    ap.add_argument("--direct-helper", action="store_true", help=argparse.SUPPRESS)
+    ap.add_argument("--direct-port", type=int, default=0, help=argparse.SUPPRESS)
+    ap.add_argument("--direct-token", default="", help=argparse.SUPPRESS)
+    ap.add_argument("--direct-if", type=int, default=-1, help=argparse.SUPPRESS)
     a = ap.parse_args(argv)
+    if a.direct_helper:
+        sys.exit(direct_link.run_helper(a.direct_port, a.direct_token, a.direct_if))
     # en el ejecutable sin consola no hay stdout/stderr: print fallaria
     if sys.stdout is None:
         sys.stdout = open(os.devnull, "w")
@@ -1060,6 +1293,7 @@ def main(argv=None):
                 break
             mode = None
     finally:
+        DIRECT.stop()                # el ayudante deja el puerto como estaba
         if sim is not None:
             sim.terminate()
             sim.wait(10)

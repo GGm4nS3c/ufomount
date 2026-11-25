@@ -19,6 +19,32 @@ otra red (por ejemplo detrás de un router, en `192.168.201.x`), escribir una IP
 (`192.168.201.0`) en el campo **Raspberry** (o **Puerto** en el modo Montura) y pulsar
 **Buscar**: recorre esa red completa y conecta al encontrarla. Después la recuerda.
 
+## Conexión directa, sin router
+
+Si no hay un router que entregue IP por DHCP (cable directo del PC a la montura, o un switch
+solo), usar **Conexión directa (sin router)** en el menú, o **Sin router…** en Montura completa:
+
+1. Conectar el cable, abrir la ventana y elegir el puerto Ethernet que diga *listo*. Con el
+   cable recién conectado, Windows tarda hasta un minuto en darse cuenta de que no hay DHCP.
+2. **Activar** y aceptar el aviso de administrador de Windows. El programa le pone al puerto la
+   IP `192.168.77.1` (u otra si choca) y le entrega una a la Raspberry (`192.168.77.10`…).
+3. Cuando la Raspberry contesta, queda seleccionada; en Montura completa se conecta sola. Si
+   en 45 s no aparece, desconectar y conectar el cable de la montura.
+4. **Detener**, o cerrar UFOMOUNT, deja el puerto como estaba. Cerrar solo la ventana no detiene.
+
+Solo le entrega IP a la montura (por el fabricante de su MAC: Raspberry Pi o la shield del
+Arduino). No arranca si el puerto ya recibe IP de un router, tiene puerta de enlace o contesta
+otro servidor DHCP: en ese caso se usa **Buscar**. Por ese cable no hay internet. En la Raspberry
+no se cambia nada. La IP es temporal (se borra al reiniciar el PC); también se agrega una regla de
+firewall para UDP 67, que se quita al detener. Si el PC se apaga de golpe, la regla queda hasta
+la próxima vez que se use. Solo Windows.
+
+Prueba (no cambia Windows ni usa la red):
+
+```bash
+python app/test_direct.py
+```
+
 Teclado: las **flechas** mueven la montura y **Espacio** la detiene, salvo mientras se escribe
 en un campo (exposición, puerto…). Un clic en cualquier otra parte devuelve las flechas a la
 montura.
