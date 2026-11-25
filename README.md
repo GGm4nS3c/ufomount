@@ -1,7 +1,21 @@
 # ufomount
 
-Montura PTZ (pan-tilt) para cámara, controlada por Arduino UNO con shield
-Ethernet y dos servos brushless GXservo GX3350ProBLS "X50 Pro":
+Montura PTZ (pan-tilt) con cámara. La plataforma principal es una **Raspberry Pi 4**, que
+mueve los servos y transmite una cámara ZWO ASI220MM Mini al PC por la red.
+
+| Para | Ver |
+|---|---|
+| Empezar o seguir en otro equipo: ramas, estado y pendientes | [docs/CONTINUAR.md](docs/CONTINUAR.md) |
+| Programa UFOMOUNT (montura y cámara, conexión sin router) | [app/README.md](app/README.md) |
+| Raspberry: servidor, cableado, servicio y protocolo | [asicam/README.md](asicam/README.md) |
+| Descargar los ejecutables | [Releases](https://github.com/GGm4nS3c/ufomount/releases) |
+
+El resto de esta página documenta el **Arduino, que queda solo como respaldo** (rama `main`).
+
+## Respaldo: Arduino UNO
+
+Montura controlada por Arduino UNO con shield Ethernet y dos servos brushless
+GXservo GX3350ProBLS "X50 Pro":
 
 - **Eje X (pan): 270°** — señal en D2
 - **Eje Y (tilt): 180°** — señal en D3
