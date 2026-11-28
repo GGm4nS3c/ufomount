@@ -3,21 +3,24 @@
 Punto de partida para usar o seguir desarrollando el proyecto sin contexto previo. Estado al
 **24 de noviembre de 2026**.
 
-## Qué es y qué rama usar
+## Qué es y dónde está cada parte
 
 Una montura PTZ (dos servos GX3350) con una cámara ZWO ASI220MM Mini. Una **Raspberry Pi 4**
 mueve los servos y transmite la cámara; el PC muestra y controla todo por red.
 
-| Rama | Qué tiene | Para qué |
-|---|---|---|
-| `fusion` | Programa UFOMOUNT del PC, más todo lo de `modulo-asicam` | **Aquí se trabaja** el programa del PC |
-| `modulo-asicam` | Servidor de la Raspberry, librería e interfaz de cámara, esquema | Base de `fusion` y `apk-foco`: los cambios del servidor van aquí |
-| `apk-foco` | App Android UFOMOUNT Foco (`android/`) | Enfocar la cámara desde el teléfono |
-| `main` | Arduino + PTZ, v4.1 | **Solo respaldo**: se guarda tal cual, no se trabaja |
+Todo está en la rama **`main`**:
 
-`fusion` y `apk-foco` salen de `modulo-asicam` y no se han unido entre sí. Los ejecutables están en
-[Releases](https://github.com/GGm4nS3c/ufomount/releases), no en el repo: las `v5.0-beta` son de la
-Raspberry y la `v4.1` del Arduino.
+| Carpeta | Qué tiene |
+|---|---|
+| `app/` | Programa UFOMOUNT del PC: montura, cámara y conexión sin router |
+| `asicam/` | Servidor de la Raspberry (`pi/`), librería e interfaz de cámara del PC (`pc/`), pruebas |
+| `android/` | App Android UFOMOUNT Foco, para enfocar la cámara desde el teléfono |
+| `firmware/`, `scripts/` | Arduino y su interfaz PTZ: **solo respaldo**, no se trabaja |
+| `docs/` | Esta guía, el esquema de la Raspberry e informes |
+
+Las ramas `fusion`, `modulo-asicam` y `apk-foco` son de antes de juntar todo en `main` y ya no se
+usan. Los ejecutables están en [Releases](https://github.com/GGm4nS3c/ufomount/releases), no en el
+repo: las `v5.0-beta` son de la Raspberry y la `v4.1` del Arduino.
 
 ## Solo usar el programa
 
@@ -39,10 +42,6 @@ git clone https://github.com/GGm4nS3c/ufomount.git
 
 ```bash
 cd ufomount
-```
-
-```bash
-git switch fusion
 ```
 
 ```bash
@@ -80,7 +79,7 @@ dist/Ufomount.exe --selftest --host 127.0.0.1
 
 Sin `--simulate` y con la IP de la Pi, `--selftest` **mueve los servos**.
 
-La app Android necesita además el JDK 17 y el SDK de Android: ver `android/README.md` en `apk-foco`.
+La app Android necesita además el JDK 17 y el SDK de Android: ver [android/README.md](../android/README.md).
 
 ### Lo que no está en el repo
 
@@ -174,6 +173,7 @@ ssh astroberry@astroberry.local "vcgencmd get_throttled; cat /sys/class/net/eth0
 ## Acuerdos de trabajo
 
 - Se trabaja por fases y cada una se aprueba antes de empezar; no se sube nada a GitHub sin permiso.
-- El Arduino solo se conserva. En `fusion` no se agregan puertos COM ni opciones de Arduino.
-- `fusion` reutiliza `scripts/ptz_gui.py` y `asicam/pc/asicam_gui.py` **sin modificarlos**.
+- Todo se trabaja en `main`.
+- El Arduino solo se conserva. En `app/` no se agregan puertos COM ni opciones de Arduino.
+- `app/` reutiliza `scripts/ptz_gui.py` y `asicam/pc/asicam_gui.py` **sin modificarlos**.
 - Commits y documentación en español.

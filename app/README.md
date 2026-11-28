@@ -2,7 +2,7 @@
 
 Programa único para usar la montura ufomount con la **Raspberry**: la Pi maneja los servos
 (PWM por hardware) y transmite la cámara ZWO ASI220MM Mini. El Arduino queda como respaldo
-con `UfomountPTZ.exe` (rama `main`).
+con `UfomountPTZ.exe` (release `v4.1`).
 
 Al abrir aparece un menú con tres modos (teclas 1, 2, 3):
 

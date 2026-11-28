@@ -5,12 +5,14 @@ mueve los servos y transmite una cámara ZWO ASI220MM Mini al PC por la red.
 
 | Para | Ver |
 |---|---|
-| Empezar o seguir en otro equipo: ramas, estado y pendientes | [docs/CONTINUAR.md](docs/CONTINUAR.md) |
+| Empezar o seguir en otro equipo: carpetas, estado y pendientes | [docs/CONTINUAR.md](docs/CONTINUAR.md) |
 | Programa UFOMOUNT (montura y cámara, conexión sin router) | [app/README.md](app/README.md) |
 | Raspberry: servidor, cableado, servicio y protocolo | [asicam/README.md](asicam/README.md) |
+| App Android para enfocar la cámara | [android/README.md](android/README.md) |
 | Descargar los ejecutables | [Releases](https://github.com/GGm4nS3c/ufomount/releases) |
 
-El resto de esta página documenta el **Arduino, que queda solo como respaldo** (rama `main`).
+El resto de esta página documenta el **Arduino, que queda solo como respaldo**. Su última versión probada es la etiqueta
+`v4.1`.
 
 ## Respaldo: Arduino UNO
 

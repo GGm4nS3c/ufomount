@@ -1,6 +1,7 @@
 # asicam: la Raspberry como relay de video de una cámara ZWO ASI
 
-Módulo aparte del proyecto ufomount (se fusionará más adelante con la GUI PTZ).
+Parte de la Raspberry del proyecto ufomount. El programa del PC que la usa junto con la
+montura está en [app/](../app/README.md).
 La Raspberry captura los cuadros **crudos** de la cámara (RAW8/RAW16, sin comprimir)
 y los reenvía por red. Todo el procesamiento se hace en el PC que se conecta.
 
